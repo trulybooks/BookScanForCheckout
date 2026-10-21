@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+	<meta name="apple-mobile-web-app-capable" content="yes">
+	<meta name="mobile-web-app-capable" content="yes">
+	<title>書籍資訊 | 真的書店</title>
+	<meta name="description" content="掃描書背條碼，直接開啟「真的書店」的單書頁。">
+
+	<!-- 官網同一組字體：標題 Noto Serif TC、內文 Noto Sans TC（DESIGN_GUIDE 3.1） -->
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=Noto+Serif+TC:wght@400;700&display=swap" rel="stylesheet">
+
+	<link rel="stylesheet" href="styles.css">
+	<link rel="icon" href="img/favicon_02_128.ico" type="image/png">
+</head>
+
+<body>
+	<div id="app">
+		<!-- Header -->
+		<header class="app-header">
+			<a class="brand" href="https://trulybookstore.in-common.tw/" target="_blank" rel="noopener">
+				<img src="img/logo.png" alt="真的書店 Truly Bookstore">
+			</a>
+		</header>
+
+		<!-- Scanner：這個 app 只有這一個畫面 -->
+		<main>
+			<div class="scanner-intro">
+				<span class="eyebrow">Scan</span>
+				<h1>掃描書背條碼</h1>
+			</div>
+
+			<div id="scanner-container">
+				<div id="reader"></div>
+			</div>
+
+			<div id="scanner-status" class="scanner-status">正在開啟相機…</div>
+
+			<!-- 自動啟動相機失敗時才出現（iOS 有時會擋掉自動播放） -->
+			<button id="btn-start-camera" class="btn btn-primary btn-large hidden">📷 開啟相機</button>
+
+			<!-- 上一本掃到的書，返回後顯示，方便確認剛才掃到什麼或再開一次 -->
+			<div id="scan-result" class="scan-result hidden">
+				<span class="eyebrow">Last scanned</span>
+				<p id="scan-result-code" class="scan-result-code"></p>
+				<a id="scan-result-link" class="btn btn-primary btn-large" href="#">再次開啟書頁</a>
+			</div>
+
+			<button id="btn-manual" class="btn btn-secondary btn-large">✏️ 手動輸入 ISBN</button>
+		</main>
+
+		<!-- 手動輸入 ISBN -->
+		<div id="modal-manual" class="modal">
+			<div class="modal-content">
+				<span class="eyebrow">Manual Entry</span>
+				<h3>手動輸入 ISBN</h3>
+				<input type="text" id="input-isbn" class="input-text" placeholder="10 或 13 位數 ISBN"
+					maxlength="17" inputmode="numeric" autocomplete="off">
+				<div class="modal-actions">
+					<button id="btn-cancel-manual" class="btn btn-secondary">取消</button>
+					<button id="btn-open-manual" class="btn btn-primary">開啟書頁</button>
+				</div>
+			</div>
+		</div>
+
+		<!-- Toast Notification -->
+		<div id="toast" class="toast"></div>
+
+		<!-- 書籍疊層：在原地用 iframe 顯示單書頁，完全不發生頁面導向。
+		     這樣就沒有彈出視窗攔截、沒有歷史條目被 client redirect 吃掉的問題，
+		     相機也不用關，關掉疊層可以立刻掃下一本。 -->
+		<div id="book-overlay" class="book-overlay hidden">
+			<div class="book-overlay-card">
+				<button id="btn-close-book" class="book-overlay-close" aria-label="關閉">✕</button>
+				<!-- iframe 由 JS 動態建立／移除，不是換 src。換 src 會在瀏覽歷史裡
+				     多加一筆，返回鍵第一下就只是倒退 iframe 的導覽、關不掉 modal。 -->
+				<div id="book-frame-slot" class="book-overlay-frame-slot"></div>
+				<a id="book-overlay-external" class="book-overlay-external" href="#" target="_blank"
+					rel="noopener">在新分頁開啟 ↗</a>
+
+				<!-- 跟右上角的 ✕ 同一個動作，只是放在拇指構得到的地方 -->
+				<button id="btn-continue-scan" class="btn btn-primary book-overlay-continue">📷 繼續掃書</button>
+			</div>
+		</div>
+
+		<!-- Footer：比照官網的深色收尾（#3E3530，DESIGN_GUIDE 1.2 / 3.8） -->
+		<footer class="app-footer">
+			<a href="https://trulybookstore.in-common.tw/books/" target="_blank" rel="noopener">瀏覽全部書單</a>
+		</footer>
+	</div>
+
+	<!-- Scripts -->
+	<script type="module" src="dist/bundle.js"></script>
+</body>
+
+</html>

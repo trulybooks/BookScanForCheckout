@@ -1,0 +1,27 @@
+{
+  "name": "bookscan-checkout",
+  "version": "1.0.0",
+  "description": "結帳用的 ISBN 條碼掃描器",
+  "main": "dist/bundle.js",
+  "scripts": {
+    "build": "esbuild src/app.ts --bundle --outfile=dist/bundle.js --format=esm --sourcemap && cp node_modules/zxing-wasm/dist/reader/zxing_reader.wasm dist/",
+    "watch": "cp node_modules/zxing-wasm/dist/reader/zxing_reader.wasm dist/ 2>/dev/null; esbuild src/app.ts --bundle --outfile=dist/bundle.js --format=esm --sourcemap --watch",
+    "serve": "npx http-server . -p 8080"
+  },
+  "keywords": [
+    "books",
+    "scanner",
+    "isbn",
+    "collections"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "esbuild": "^0.19.12",
+    "typescript": "^5.3.0"
+  },
+  "dependencies": {
+    "zxing-wasm": "^3.1.0"
+  }
+}

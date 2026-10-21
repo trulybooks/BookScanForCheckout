@@ -1,0 +1,77 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      - name: Install dependencies
+        run: npm install
+      
+      - name: Build
+        run: npm run build
+
+      # 只把真正要上線的檔案組進 _site。先前是直接上傳整個工作目錄
+      # （path: '.'），連 40MB 的 node_modules、src/、.github/ 都一起傳，
+      # 每次部署都白費一堆時間。要新增靜態資源時記得加進這一行。
+      #
+      # ⚠️ 之後若要設自訂網域：在 repo 根目錄放一個 CNAME 檔，並且把它加進下面的
+      # cp 清單。自訂網域是由發佈內容裡的 CNAME 檔決定的，漏掉的話每次部署都會把
+      # 網域設定洗掉、站台掉回 github.io，而且失敗是無聲的。
+      # 千萬不要沿用結帳以外那支掃描器的網域（scanner.in-common.tw），
+      # 兩個 repo 用同一個網域會互相搶。
+      - name: Assemble site
+        run: |
+          mkdir -p _site
+          cp -R index.html styles.css img dist _site/
+          echo "--- _site 內容 ---"
+          du -sh _site
+          ls -R _site | head -30
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+        with:
+          enablement: true
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: '_site'
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+        with:
+          # GitHub Pages deployments intermittently take far longer than the
+          # 10-minute default before reporting success — give them room
+          # instead of failing the whole run with "Timeout reached".
+          timeout: 1200000
