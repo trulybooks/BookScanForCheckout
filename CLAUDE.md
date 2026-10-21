@@ -1,26 +1,75 @@
 # 結帳掃描器 (BookScanForCheckout)
 
-A checkout-desk barcode scanner for 真的書店.
+The checkout-desk tool for 真的書店. An operator enters an order — buyer name, invoice
+carrier, and one row per book (ISBN and/or title) — and the app prices it against the shop's
+catalogue, works out the store credit, and writes the order back to the checkout spreadsheet.
 
-> **Status: this is a verbatim fork of the customer-facing scanner
-> (`../BookScanForCustomer`, live at scanner.in-common.tw), with the checkout behaviour not
-> yet built.** Everything below describes what was copied, not what this app is meant to do.
-> The intended differences are a Google Sheet integration and a different set of fields.
->
-> Sections describing the camera and overlay mechanics — `armed`, the concurrent-start
-> guards, the iframe history behaviour — were each paid for with a bug found on a real phone
-> and stay true regardless of what gets built on top. **Read those before touching
-> `scanner.ts` or the overlay.** The parts describing *purpose* ("opens the book page",
-> "nothing is persisted, nothing is sent anywhere") are inherited and will stop being true.
->
-> Two things deliberately did not come across in the copy: `CNAME` (the two repos must never
-> claim the same custom domain) and `QUICKSTART.md` (it still documented a collection manager
-> removed long ago). The deploy workflow's CNAME check was removed to match; restore both
-> together when this app gets a domain.
+Mobile-friendly static web app. No backend and no build-time secrets — TypeScript bundled with
+esbuild, deployed as static files to GitHub Pages on every push to `main`.
 
-Mobile-friendly static web app. No backend and no build-time secrets — TypeScript bundled
-with esbuild, deployed as static files to GitHub Pages on every push to `main`
-(`.github/workflows/deploy.yml`).
+## Where the data lives
+
+Two different Google Sheets, and they are reached in two different ways.
+
+**Reading the catalogue** (`catalog.ts`) — the same sheet the website's `all-books` page is
+generated from (`truly-bookstore/python_script/script_all_books_list.py` reads it too). The
+browser fetches its CSV export directly, because **that URL does send
+`access-control-allow-origin: *`** — unlike the website itself, which is on Netlify with no
+CORS headers at all. So no build-time catalogue snapshot is needed and prices are never stale.
+Roughly 968 rows / 394KB, held in memory and scanned linearly; no index is warranted.
+
+Columns used: `書名`, `ISBN`, `作者`, `定價`, `現場書籍狀態`. If the shop renames one,
+`toRecords` throws by design — a silently missing `定價` column would print a bill where
+every book costs nothing.
+
+**`現場書籍狀態` is the new/used field**, not `銷售`. `銷售` holds sales channels and also
+contains the string "新書", which makes it an easy and expensive thing to grab by mistake.
+Only the exact value `舊書` counts as used; 無書 / 非賣 / 借出 / blank are all treated as new
+(the shop's call).
+
+**Writing the order** (`sheet.ts` + `apps_script/checkout_append.gs`) — a Google Apps Script
+Web App, because the CSV export is read-only. The two files are one contract; changing the
+payload means changing both.
+
+## Things about the checkout sheet that will bite
+
+- **The header is on row 2**, and data starts on row 3.
+- **Rows below the data are pre-filled** with 訂單編號, 購買日期, 數量, 付款方式 and more, by
+  formula. So `getLastRow() + 1` lands a hundred rows past where the order belongs. The script
+  finds the first row where **both ISBN and 商品 are empty** instead.
+- Only four columns are written: 姓名 (C), ISBN (F), 商品 (G), 單價 (I).
+- **Never write 金額 (J).** It is a formula, 數量 × 單價 — filling 單價 makes it compute on its
+  own, and writing a value there destroys it for that row.
+- ISBN is written with a text number format. Without it Google turns a 13-digit ISBN into
+  `9.78986E+12`.
+
+## Store credit
+
+`pricing.ts`. Tiers are on the **used-book subtotal for the whole order** — not per book, and
+new books don't count toward the threshold. Only the highest tier applies and **600 is the
+ceiling**: 300–599 gives 100, 600 and above gives 300, however much more is spent. It is
+credit, not a discount: the amount payable is unaffected.
+
+## The POST can't use application/json
+
+`application/json` triggers a CORS preflight, which Apps Script Web Apps don't answer, so the
+request fails outright. The body is still JSON but the content type is `text/plain`, which
+makes it a simple request. Apps Script parses it the same way.
+
+The response *is* usually readable — Apps Script redirects to script.googleusercontent.com,
+which sends `Access-Control-Allow-Origin: *` — so a write can genuinely be confirmed, and for
+a till that matters. When the read is blocked anyway, `submitOrder` returns `unconfirmed`
+rather than pretending: the request did go out (CORS blocks reading the response, not sending
+it), so **it must not be retried** — that would write the order twice. The operator is told to
+check the sheet.
+
+## Scanning
+
+`scanner.ts` is inherited from the customer-facing scanner and its camera comments still
+apply — read them before touching it. One addition here: `ScanTarget` switches both the barcode
+formats and the validator, because the till scans two unrelated things. ISBNs are EAN-13 and
+friends; **invoice carriers are Code 39** (`/` plus 7 characters). Decoding both at once invites
+misreads, e.g. a carrier whose payload happens to be 8 digits.
 
 ## Commands
 

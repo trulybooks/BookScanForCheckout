@@ -83,7 +83,7 @@ h1, h2, h3 {
 	border-bottom: 1px solid var(--border);
 	padding: 12px var(--spacing-md);
 	display: flex;
-	justify-content: center;
+	justify-content: space-between;
 	align-items: center;
 	position: sticky;
 	top: 0;
@@ -168,6 +168,28 @@ h1, h2, h3 {
 	background: var(--bg-tint);
 }
 
+.icon-btn {
+	background: transparent;
+	border: none;
+	font-size: 1.1rem;
+	color: var(--accent);
+	cursor: pointer;
+	min-width: var(--tap-target-min);
+	min-height: var(--tap-target-min);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	border-radius: 9999px;
+	transition: all 0.3s ease;
+	-webkit-tap-highlight-color: transparent;
+}
+
+.icon-btn:hover,
+.icon-btn:active {
+	background: var(--bg-tint);
+	color: var(--primary);
+}
+
 .btn-large {
 	width: 100%;
 	padding: 16px 24px;
@@ -185,23 +207,13 @@ main {
 	gap: 12px;
 }
 
-.scanner-intro {
-	text-align: center;
-	margin-bottom: 4px;
-}
-
-.scanner-intro h1 {
-	font-size: 1.4rem;
-}
-
+/* 掃描器畫面（被掃描疊層包住） */
 #scanner-container {
 	border-radius: 2px;
 	overflow: hidden;
 	border: 1px solid var(--border);
-	box-shadow: var(--shadow-card-hover);
-	/* 相機還沒起來前先鋪深色底，避免閃一塊白 */
 	background: var(--bg-deep);
-	min-height: 220px;
+	min-height: 180px;
 	display: flex;
 	align-items: center;
 	justify-content: center;
@@ -212,39 +224,15 @@ main {
 	border: none;
 }
 
-.scanner-status {
-	padding: 12px var(--spacing-md);
+.scan-status {
+	padding: 10px var(--spacing-md);
 	background: var(--bg-tint);
 	border: 1px solid var(--border);
 	border-radius: 2px;
 	text-align: center;
-	font-size: 0.875rem;
+	font-size: 0.82rem;
 	letter-spacing: 0.05em;
 	color: var(--secondary);
-}
-
-/* 最後掃到的一本：官網 3.4 的「左框強調卡」 */
-.scan-result {
-	background: var(--bg-surface);
-	border: 1px solid var(--border);
-	border-left: 4px solid rgba(212, 197, 176, 0.5);
-	border-radius: 2px;
-	padding: var(--spacing-md);
-	box-shadow: var(--shadow-card);
-	text-align: center;
-}
-
-.scan-result .eyebrow {
-	font-size: 0.6rem;
-}
-
-.scan-result-code {
-	font-family: 'Noto Serif TC', serif;
-	font-weight: 700;
-	font-size: 1.15rem;
-	letter-spacing: 0.08em;
-	margin-bottom: 12px;
-	word-break: break-all;
 }
 
 /* ==========================================================================
@@ -336,117 +324,309 @@ main {
 }
 
 /* ==========================================================================
-   Book overlay — 掃到書之後在原地蓋出單書頁
-   沿用官網全站共用的 modal 殼（DESIGN_GUIDE 2.8 / 3.9）：bg-black/80 +
-   backdrop-blur-md 遮罩、bg-light rounded-sm shadow-2xl 卡片、scale-95→100，
-   遮罩與卡片一律 300ms。不要為了這個疊層另外設計一套彈窗視覺語言。
+   Checkout — 畫面切換、表單、明細
+   顏色與圓角一律走既有 token（按鈕 rounded-full、卡片 rounded-sm，
+   DESIGN_GUIDE 3.3 / 3.4），這一段只負責結帳特有的版面。
    ========================================================================== */
-.book-overlay {
+.view { display: none; }
+.view.active { display: flex; flex-direction: column; gap: 14px; animation: fadeInUp 0.4s ease-out; }
+
+@keyframes fadeInUp {
+	from { opacity: 0; transform: translate3d(0, 10px, 0); }
+	to { opacity: 1; transform: none; }
+}
+
+.view-head { text-align: center; padding-bottom: 6px; }
+.view-head h1 { font-size: 1.5rem; }
+
+/* ---------- 表單欄位 ---------- */
+.field-group { display: flex; flex-direction: column; gap: 12px; }
+.field { display: flex; flex-direction: column; gap: 5px; }
+
+.field-label {
+	font-size: 0.78rem;
+	letter-spacing: 0.08em;
+	color: var(--secondary);
+}
+
+/* 輸入框 + 掃描鈕並排。輸入框要能縮，否則窄螢幕會把按鈕擠出畫面 */
+.field-with-btn { display: flex; gap: 8px; align-items: stretch; }
+.field-with-btn .input-text { flex: 1; min-width: 0; }
+
+.btn-scan {
+	flex-shrink: 0;
+	width: var(--tap-target-min);
+	min-height: var(--tap-target-min);
+	background: var(--bg-surface);
+	border: 1px solid var(--border);
+	border-radius: 9999px;
+	font-size: 1.05rem;
+	cursor: pointer;
+	transition: all 0.3s ease;
+	-webkit-tap-highlight-color: transparent;
+}
+
+.btn-scan:hover, .btn-scan:active { background: var(--bg-tint); border-color: var(--primary); }
+
+/* ---------- 書目列 ---------- */
+.books-head {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	border-bottom: 1px solid var(--border);
+	padding-bottom: 6px;
+	margin-top: 6px;
+}
+
+.books-head .eyebrow { margin-bottom: 0; }
+.book-count { font-size: 0.78rem; color: var(--secondary); letter-spacing: 0.05em; }
+
+.book-rows { display: flex; flex-direction: column; gap: 10px; }
+
+.book-row {
+	background: var(--bg-surface);
+	border: 1px solid var(--border);
+	border-left: 4px solid rgba(212, 197, 176, 0.5);
+	border-radius: 2px;
+	padding: 10px 12px 12px;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	box-shadow: var(--shadow-card);
+}
+
+.book-row-head { display: flex; align-items: center; justify-content: space-between; }
+
+.book-row-no {
+	font-family: 'Noto Serif TC', serif;
+	font-weight: 700;
+	font-size: 0.9rem;
+	color: var(--accent);
+}
+
+.book-row-remove {
+	background: none; border: none; cursor: pointer;
+	color: var(--accent); font-size: 0.9rem;
+	width: 32px; height: 32px; border-radius: 9999px;
+	transition: all 0.3s ease;
+	-webkit-tap-highlight-color: transparent;
+}
+
+.book-row-remove:hover, .book-row-remove:active { background: var(--bg-tint); color: var(--primary); }
+
+.form-error {
+	background: rgba(156, 74, 63, 0.07);
+	border: 1px solid rgba(156, 74, 63, 0.3);
+	border-radius: 2px;
+	padding: 11px 14px;
+	font-size: 0.85rem;
+	color: var(--danger);
+}
+
+/* ---------- 確認明細 ---------- */
+.review-list { display: flex; flex-direction: column; gap: 12px; }
+
+.review-item {
+	display: grid;
+	grid-template-columns: 22px minmax(0, 1fr);
+	gap: 10px;
+	background: var(--bg-surface);
+	border: 1px solid var(--border);
+	border-radius: 2px;
+	padding: 12px;
+	box-shadow: var(--shadow-card);
+}
+
+.review-item--missing { border-left: 4px solid rgba(156, 74, 63, 0.45); }
+.review-body { min-width: 0; display: flex; flex-direction: column; gap: 7px; }
+
+.review-no {
+	font-family: 'Noto Serif TC', serif;
+	font-weight: 700;
+	color: var(--accent);
+	font-size: 0.9rem;
+}
+
+.review-typed { font-size: 0.78rem; color: var(--accent); letter-spacing: 0.04em; word-break: break-all; }
+.review-note { font-size: 0.78rem; color: var(--secondary); }
+.review-note--warn { color: var(--danger); font-weight: 700; }
+
+.candidates { display: flex; flex-direction: column; gap: 6px; }
+
+.candidate {
+	display: flex;
+	align-items: center;
+	gap: 9px;
+	padding: 9px 10px;
+	border: 1px solid var(--border);
+	border-radius: 2px;
+	background: var(--bg-base);
+	cursor: pointer;
+	transition: all 0.3s ease;
+}
+
+.candidate--on { border-color: var(--primary); background: var(--bg-tint); }
+.candidate input { accent-color: var(--primary); flex-shrink: 0; }
+.candidate-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+
+.candidate-title {
+	font-family: 'Noto Serif TC', serif;
+	font-weight: 700;
+	font-size: 0.92rem;
+	line-height: 1.45;
+	word-break: break-word;
+}
+
+.candidate-meta { font-size: 0.72rem; color: var(--secondary); word-break: break-all; }
+.candidate-side { flex-shrink: 0; display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
+.candidate-price { font-weight: 700; font-size: 0.88rem; font-variant-numeric: tabular-nums; }
+
+.tag {
+	font-size: 0.66rem;
+	letter-spacing: 0.08em;
+	padding: 2px 8px;
+	border-radius: 9999px;
+	border: 1px solid var(--deco);
+	color: var(--secondary);
+	background: var(--bg-surface);
+	white-space: nowrap;
+}
+
+/* 舊書要一眼認得出來——購物金級距只看它 */
+.tag--used { background: var(--primary); border-color: var(--primary); color: var(--light); }
+
+/* ---------- 金額 ---------- */
+.totals {
+	background: var(--bg-tint);
+	border: 1px solid var(--border);
+	border-radius: 2px;
+	padding: 14px 16px;
+	display: flex;
+	flex-direction: column;
+	gap: 7px;
+}
+
+.total-line {
+	display: flex;
+	justify-content: space-between;
+	font-size: 0.85rem;
+	color: var(--secondary);
+	font-variant-numeric: tabular-nums;
+}
+
+.total-line--main {
+	font-size: 1.1rem;
+	font-weight: 700;
+	color: var(--primary);
+	font-family: 'Noto Serif TC', serif;
+	border-top: 1px solid var(--border);
+	padding-top: 8px;
+	margin-top: 2px;
+}
+
+.credit {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	background: var(--primary);
+	color: var(--light);
+	border-radius: 2px;
+	padding: 10px 13px;
+	margin-top: 4px;
+}
+
+.credit-label { font-size: 0.8rem; letter-spacing: 0.1em; }
+.credit-value { font-family: 'Noto Serif TC', serif; font-weight: 700; font-size: 1.05rem; font-variant-numeric: tabular-nums; }
+.credit-hint { font-size: 0.75rem; color: var(--accent); text-align: right; }
+.credit-hint--warn { color: var(--danger); }
+
+.action-row { display: flex; gap: 10px; }
+.action-row .btn { flex: 1; min-width: 0; white-space: nowrap; }
+
+/* ---------- 完成 ---------- */
+.result-body { display: flex; flex-direction: column; gap: 14px; }
+
+.banner {
+	border-radius: 2px;
+	padding: 12px 14px;
+	font-size: 0.85rem;
+	line-height: 1.6;
+	border: 1px solid var(--border);
+}
+
+.banner--ok { background: var(--bg-tint); border-left: 4px solid var(--deco); color: var(--primary); }
+.banner--warn { background: rgba(212, 197, 176, 0.25); border-left: 4px solid var(--accent); color: var(--primary); }
+.banner--err { background: rgba(156, 74, 63, 0.07); border-left: 4px solid var(--danger); color: var(--danger); }
+
+.result-meta { display: flex; flex-direction: column; gap: 5px; font-size: 0.85rem; }
+.result-meta div { display: flex; justify-content: space-between; border-bottom: 1px solid var(--border); padding-bottom: 5px; }
+.result-meta span { color: var(--secondary); }
+
+.result-books { list-style: none; display: flex; flex-direction: column; gap: 7px; }
+
+.result-books li {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	font-size: 0.85rem;
+	border-bottom: 1px solid var(--border);
+	padding-bottom: 7px;
+}
+
+.result-book-title { flex: 1; min-width: 0; word-break: break-word; }
+.result-book-price { font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* ---------- 掃描疊層 ---------- */
+/* 沿用官網全站共用的 modal 殼（DESIGN_GUIDE 2.8 / 3.9） */
+.scan-overlay {
 	position: fixed;
 	inset: 0;
 	z-index: 900;
 	display: flex;
 	align-items: center;
 	justify-content: center;
+	padding: 16px;
 	background: rgba(0, 0, 0, 0.8);
 	backdrop-filter: blur(12px);
 	-webkit-backdrop-filter: blur(12px);
-	padding: 16px;
-	/* iPhone 瀏海與底部 home indicator 的安全區 */
-	padding-top: calc(16px + env(safe-area-inset-top, 0px));
-	padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
 	animation: modalFadeIn 0.3s ease forwards;
 }
 
-.book-overlay-card {
+.scan-card {
 	position: relative;
-	display: flex;
-	flex-direction: column;
 	width: 100%;
-	max-width: 720px;
-	height: 100%;
-	max-height: 900px;
+	max-width: 460px;
 	background: var(--light);
 	border-radius: 2px;
 	box-shadow: var(--shadow-modal);
-	/* 上方留白給右上角的 ✕，不要讓它壓在書頁內容上 */
-	padding: 44px 10px 10px;
+	padding: 40px 14px 14px;
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
 	animation: modalScaleIn 0.3s ease forwards;
 }
 
-/* ✕ 沿用官網 modal 的關閉鈕：右上角、平時半透明、hover 才變實 */
-.book-overlay-close {
+.scan-close {
 	position: absolute;
-	top: 4px;
-	right: 6px;
-	width: var(--tap-target-min);
-	height: var(--tap-target-min);
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	background: transparent;
-	border: none;
+	top: 4px; right: 6px;
+	width: var(--tap-target-min); height: var(--tap-target-min);
+	display: flex; align-items: center; justify-content: center;
+	background: none; border: none;
 	color: var(--primary);
-	font-size: 1.4rem;
-	line-height: 1;
+	font-size: 1.3rem;
 	cursor: pointer;
-	/* 官網 modal 的關閉鈕靜止時是 0.3、靠 hover 變實。這裡提高到 0.55：
-	   手機沒有 hover，它會一直停在靜止狀態，而這是每掃一本都要按的主要出口。 */
 	opacity: 0.55;
 	transition: opacity 0.3s ease;
 	-webkit-tap-highlight-color: transparent;
 }
 
-.book-overlay-close:hover,
-.book-overlay-close:active {
-	opacity: 1;
-}
+.scan-close:hover, .scan-close:active { opacity: 1; }
 
-.book-overlay-frame-slot {
-	flex: 1;
-	min-height: 0;
-	display: flex;
-}
-
-.book-overlay-frame {
-	flex: 1;
-	width: 100%;
-	border: 1px solid var(--border);
-	border-radius: 2px;
-	background: var(--bg-surface);
-}
-
-/* 外開連結置中放在書頁正下方，用官網的「次要連結」樣式（DESIGN_GUIDE 3.3） */
-.book-overlay-external {
-	flex-shrink: 0;
-	align-self: center;
-	margin-top: 12px;
-	color: var(--primary);
-	font-size: 0.8rem;
+.scan-heading {
+	font-family: 'Noto Serif TC', serif;
 	font-weight: 700;
-	letter-spacing: 0.1em;
-	text-decoration: none;
-	border-bottom: 1px solid rgba(74, 64, 58, 0.2);
-	padding-bottom: 2px;
-	transition: all 0.3s ease;
-}
-
-.book-overlay-external:hover {
-	border-color: var(--primary);
-}
-
-/* 主要出口：放在 modal 最下方，單手也按得到 */
-.book-overlay-continue {
-	flex-shrink: 0;
-	width: 100%;
-	margin-top: 12px;
-}
-
-@media (prefers-reduced-motion: reduce) {
-	.book-overlay,
-	.book-overlay-card {
-		animation: none;
-	}
+	text-align: center;
+	font-size: 1.05rem;
 }
 
 /* ==========================================================================

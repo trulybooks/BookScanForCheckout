@@ -6,8 +6,8 @@
 	<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 	<meta name="apple-mobile-web-app-capable" content="yes">
 	<meta name="mobile-web-app-capable" content="yes">
-	<title>書籍資訊 | 真的書店</title>
-	<meta name="description" content="掃描書背條碼，直接開啟「真的書店」的單書頁。">
+	<title>結帳 | 真的書店</title>
+	<meta name="description" content="真的書店結帳櫃台用的掃描與開單工具。">
 
 	<!-- 官網同一組字體：標題 Noto Serif TC、內文 Noto Sans TC（DESIGN_GUIDE 3.1） -->
 	<link rel="preconnect" href="https://fonts.googleapis.com">
@@ -20,80 +20,119 @@
 
 <body>
 	<div id="app">
-		<!-- Header -->
 		<header class="app-header">
 			<a class="brand" href="https://trulybookstore.in-common.tw/" target="_blank" rel="noopener">
 				<img src="img/logo.png" alt="真的書店 Truly Bookstore">
 			</a>
+			<button id="btn-settings" class="icon-btn" aria-label="設定">⚙️</button>
 		</header>
 
-		<!-- Scanner：這個 app 只有這一個畫面 -->
 		<main>
-			<div class="scanner-intro">
-				<span class="eyebrow">Scan</span>
-				<h1>掃描書背條碼</h1>
-			</div>
+			<!-- ============ 畫面 1：填表 ============ -->
+			<section id="view-form" class="view active">
+				<div class="view-head">
+					<span class="eyebrow">Checkout</span>
+					<h1>結帳</h1>
+				</div>
 
-			<div id="scanner-container">
-				<div id="reader"></div>
-			</div>
+				<div class="field-group">
+					<label class="field">
+						<span class="field-label">購買人姓名 ＊</span>
+						<input type="text" id="input-name" class="input-text" autocomplete="off"
+							placeholder="結帳者姓名">
+					</label>
 
-			<div id="scanner-status" class="scanner-status">正在開啟相機…</div>
+					<div class="field">
+						<span class="field-label">發票載具編號</span>
+						<div class="field-with-btn">
+							<input type="text" id="input-carrier" class="input-text" autocomplete="off"
+								placeholder="/ABC1234" maxlength="8">
+							<button id="btn-scan-carrier" class="btn-scan" aria-label="掃描載具條碼">📷</button>
+						</div>
+					</div>
+				</div>
 
-			<!-- 自動啟動相機失敗時才出現（iOS 有時會擋掉自動播放） -->
-			<button id="btn-start-camera" class="btn btn-primary btn-large hidden">📷 開啟相機</button>
+				<div class="books-head">
+					<span class="eyebrow">Books</span>
+					<span id="book-count" class="book-count"></span>
+				</div>
 
-			<!-- 上一本掃到的書，返回後顯示，方便確認剛才掃到什麼或再開一次 -->
-			<div id="scan-result" class="scan-result hidden">
-				<span class="eyebrow">Last scanned</span>
-				<p id="scan-result-code" class="scan-result-code"></p>
-				<a id="scan-result-link" class="btn btn-primary btn-large" href="#">再次開啟書頁</a>
-			</div>
+				<!-- 書目列由 JS 產生 -->
+				<div id="book-rows" class="book-rows"></div>
 
-			<button id="btn-manual" class="btn btn-secondary btn-large">✏️ 手動輸入 ISBN</button>
+				<button id="btn-add-book" class="btn btn-secondary btn-large">＋ 加一本書</button>
+
+				<div id="form-error" class="form-error hidden"></div>
+
+				<button id="btn-lookup" class="btn btn-primary btn-large">查詢定價</button>
+			</section>
+
+			<!-- ============ 畫面 2：確認 ============ -->
+			<section id="view-review" class="view">
+				<div class="view-head">
+					<span class="eyebrow">Confirm</span>
+					<h1>確認明細</h1>
+				</div>
+
+				<div id="review-list" class="review-list"></div>
+				<div id="totals" class="totals"></div>
+
+				<div class="action-row">
+					<button id="btn-back-form" class="btn btn-secondary btn-large">← 回去修改</button>
+					<button id="btn-submit" class="btn btn-primary btn-large">確認送出</button>
+				</div>
+			</section>
+
+			<!-- ============ 畫面 3：完成 ============ -->
+			<section id="view-result" class="view">
+				<div class="view-head">
+					<span class="eyebrow">Done</span>
+					<h1 id="result-title">結帳完成</h1>
+				</div>
+
+				<div id="result-body" class="result-body"></div>
+
+				<button id="btn-new-order" class="btn btn-primary btn-large">開始下一單</button>
+			</section>
 		</main>
 
-		<!-- 手動輸入 ISBN -->
-		<div id="modal-manual" class="modal">
+		<footer class="app-footer">
+			<span id="catalog-status">書目載入中…</span>
+		</footer>
+
+		<!-- ============ 掃描疊層 ============ -->
+		<div id="scan-overlay" class="scan-overlay hidden">
+			<div class="scan-card">
+				<button id="btn-close-scan" class="scan-close" aria-label="關閉">✕</button>
+				<p id="scan-title" class="scan-heading">掃描 ISBN 條碼</p>
+				<div id="scanner-container">
+					<div id="reader"></div>
+				</div>
+				<div id="scan-status" class="scan-status">正在開啟相機…</div>
+				<button id="btn-cancel-scan" class="btn btn-secondary btn-large">取消</button>
+			</div>
+		</div>
+
+		<!-- ============ 設定 ============ -->
+		<div id="modal-settings" class="modal">
 			<div class="modal-content">
-				<span class="eyebrow">Manual Entry</span>
-				<h3>手動輸入 ISBN</h3>
-				<input type="text" id="input-isbn" class="input-text" placeholder="10 或 13 位數 ISBN"
-					maxlength="17" inputmode="numeric" autocomplete="off">
+				<span class="eyebrow">Settings</span>
+				<h3>設定</h3>
+				<h4>寫入 Google Sheet</h4>
+				<input type="text" id="input-webapp-url" class="input-text"
+					placeholder="Apps Script Web App 網址（…/exec）">
+				<p>部署方式見 <code>apps_script/checkout_append.gs</code> 開頭的說明。沒填網址時仍可算帳，
+					但不會寫進試算表。</p>
 				<div class="modal-actions">
-					<button id="btn-cancel-manual" class="btn btn-secondary">取消</button>
-					<button id="btn-open-manual" class="btn btn-primary">開啟書頁</button>
+					<button id="btn-cancel-settings" class="btn btn-secondary">取消</button>
+					<button id="btn-save-settings" class="btn btn-primary">儲存</button>
 				</div>
 			</div>
 		</div>
 
-		<!-- Toast Notification -->
 		<div id="toast" class="toast"></div>
-
-		<!-- 書籍疊層：在原地用 iframe 顯示單書頁，完全不發生頁面導向。
-		     這樣就沒有彈出視窗攔截、沒有歷史條目被 client redirect 吃掉的問題，
-		     相機也不用關，關掉疊層可以立刻掃下一本。 -->
-		<div id="book-overlay" class="book-overlay hidden">
-			<div class="book-overlay-card">
-				<button id="btn-close-book" class="book-overlay-close" aria-label="關閉">✕</button>
-				<!-- iframe 由 JS 動態建立／移除，不是換 src。換 src 會在瀏覽歷史裡
-				     多加一筆，返回鍵第一下就只是倒退 iframe 的導覽、關不掉 modal。 -->
-				<div id="book-frame-slot" class="book-overlay-frame-slot"></div>
-				<a id="book-overlay-external" class="book-overlay-external" href="#" target="_blank"
-					rel="noopener">在新分頁開啟 ↗</a>
-
-				<!-- 跟右上角的 ✕ 同一個動作，只是放在拇指構得到的地方 -->
-				<button id="btn-continue-scan" class="btn btn-primary book-overlay-continue">📷 繼續掃書</button>
-			</div>
-		</div>
-
-		<!-- Footer：比照官網的深色收尾（#3E3530，DESIGN_GUIDE 1.2 / 3.8） -->
-		<footer class="app-footer">
-			<a href="https://trulybookstore.in-common.tw/books/" target="_blank" rel="noopener">瀏覽全部書單</a>
-		</footer>
 	</div>
 
-	<!-- Scripts -->
 	<script type="module" src="dist/bundle.js"></script>
 </body>
 

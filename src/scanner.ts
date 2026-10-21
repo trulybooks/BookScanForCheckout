@@ -11,9 +11,38 @@ prepareZXingModule({
 	}
 });
 
-const READER_OPTIONS: ReaderOptions = {
-	formats: ['EAN13', 'EAN8', 'UPCA', 'UPCE', 'Code128'],
-	tryHarder: true
+/**
+ * 掃描目標。結帳要掃兩種完全不同的東西，格式與驗證都不一樣，
+ * 混在一起掃會互相誤判——例如載具的 Code 39 內容剛好是 8 位數時。
+ */
+export type ScanTarget = 'isbn' | 'carrier';
+
+const READER_OPTIONS: Record<ScanTarget, ReaderOptions> = {
+	isbn: {
+		formats: ['EAN13', 'EAN8', 'UPCA', 'UPCE', 'Code128'],
+		tryHarder: true
+	},
+	// 手機條碼載具印的是 Code 39
+	carrier: {
+		formats: ['Code39'],
+		tryHarder: true
+	}
+};
+
+/** 手機條碼載具：`/` 開頭，後面 7 碼（大寫英數與 + - .），共 8 碼。 */
+function isValidCarrier(code: string): boolean {
+	return /^\/[0-9A-Z+\-.]{7}$/.test(code.trim().toUpperCase());
+}
+
+function isValidISBN(code: string): boolean {
+	const clean = code.replace(/[-\s]/g, '');
+	// 13 碼 EAN-13／ISBN-13，或 10 碼 ISBN-10
+	return /^\d{13}$/.test(clean) || /^\d{9}[0-9X]$/i.test(clean);
+}
+
+const VALIDATORS: Record<ScanTarget, (code: string) => boolean> = {
+	isbn: isValidISBN,
+	carrier: isValidCarrier
 };
 
 // Central region of the camera frame that gets cropped out and decoded,
@@ -87,6 +116,7 @@ export class ScannerService {
 	async startScanner(
 		elementId: string,
 		onSuccess: (decodedText: string) => void,
+		target: ScanTarget = 'isbn',
 		onError?: (error: string) => void
 	): Promise<void> {
 		// 已在執行或正在啟動就安靜返回。這是返回本頁時的正常情況，不是錯誤——
@@ -204,11 +234,11 @@ export class ScannerService {
 				ctx.drawImage(this.videoEl, cx, cy, cw, ch, 0, 0, cw, ch);
 
 				try {
-					const results = await readBarcodes(ctx.getImageData(0, 0, cw, ch), READER_OPTIONS);
+					const results = await readBarcodes(ctx.getImageData(0, 0, cw, ch), READER_OPTIONS[target]);
 
 					let found: string | null = null;
 					for (const result of results) {
-						if (result.isValid && this.isValidISBN(result.text)) {
+						if (result.isValid && VALIDATORS[target](result.text)) {
 							found = result.text;
 							break;
 						}
@@ -301,16 +331,5 @@ export class ScannerService {
 			this.containerEl = null;
 		}
 		this.videoEl = null;
-	}
-
-	/**
-	 * Validate if the scanned code is a valid ISBN/EAN-13
-	 */
-	private isValidISBN(code: string): boolean {
-		// Remove any hyphens or spaces
-		const cleanCode = code.replace(/[-\s]/g, '');
-
-		// Check if it's 13 digits (EAN-13/ISBN-13) or 10 digits (ISBN-10)
-		return /^\d{13}$/.test(cleanCode) || /^\d{9}[0-9X]$/i.test(cleanCode);
 	}
 }
