@@ -5,7 +5,8 @@
  * 改了 payload 形狀就要一起改。
  */
 
-const SETTINGS_KEY = 'bookScanCheckout_webAppUrl';
+const URL_KEY = 'bookScanCheckout_webAppUrl';
+const SECRET_KEY = 'bookScanCheckout_secret';
 
 export interface OrderItem {
 	isbn: string;
@@ -18,20 +19,34 @@ export type SubmitOutcome =
 	| { status: 'unconfirmed' }
 	| { status: 'error'; message: string };
 
-export function getWebAppUrl(): string {
+function read(key: string): string {
 	try {
-		return localStorage.getItem(SETTINGS_KEY) ?? '';
+		return localStorage.getItem(key) ?? '';
 	} catch {
 		return '';
 	}
 }
 
-export function saveWebAppUrl(url: string): void {
+function write(key: string, value: string): void {
 	try {
-		localStorage.setItem(SETTINGS_KEY, url.trim());
+		localStorage.setItem(key, value.trim());
 	} catch {
 		/* 存不了就只能每次重填，不影響送單本身 */
 	}
+}
+
+export const getWebAppUrl = () => read(URL_KEY);
+export const getSecret = () => read(SECRET_KEY);
+
+/**
+ * 網址與密鑰都只存在這台裝置的 localStorage，不進 repo、不進 bundle。
+ *
+ * ⚠️ 這兩個值合起來就是寫入這張試算表的全部憑證。端點部署成「任何人可存取」，
+ * 所以它們等同密碼——不要貼進 repo、截圖或訊息裡。
+ */
+export function saveSettings(url: string, secret: string): void {
+	write(URL_KEY, url);
+	write(SECRET_KEY, secret);
 }
 
 /**
@@ -49,10 +64,11 @@ export function saveWebAppUrl(url: string): void {
  */
 export async function submitOrder(
 	webAppUrl: string,
+	secret: string,
 	name: string,
 	items: OrderItem[]
 ): Promise<SubmitOutcome> {
-	const body = JSON.stringify({ name, items });
+	const body = JSON.stringify({ secret, name, items });
 
 	try {
 		const res = await fetch(webAppUrl, {

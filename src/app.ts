@@ -2,7 +2,7 @@ import { ScannerService, ScanTarget } from './scanner.js';
 import { UIUtils } from './utils.js';
 import { Catalog, CatalogBook, normalizeISBN } from './catalog.js';
 import { calculateTotals, OrderTotals } from './pricing.js';
-import { getWebAppUrl, saveWebAppUrl, submitOrder, OrderItem, SubmitOutcome } from './sheet.js';
+import { getWebAppUrl, getSecret, saveSettings, submitOrder, OrderItem, SubmitOutcome } from './sheet.js';
 
 /** 表單上的一列書。查詢前只有店員輸入的內容。 */
 interface BookRow {
@@ -271,8 +271,9 @@ class CheckoutApp {
 		}
 
 		const url = getWebAppUrl();
+		const secret = getSecret();
 		const outcome: SubmitOutcome = url
-			? await submitOrder(url, name, items)
+			? await submitOrder(url, secret, name, items)
 			: { status: 'error', message: '尚未設定 Apps Script 網址，這一單沒有寫進試算表。' };
 
 		this.renderResult(name, carrier, books, totals, outcome);
@@ -414,6 +415,7 @@ class CheckoutApp {
 
 		document.getElementById('btn-settings')?.addEventListener('click', () => {
 			(document.getElementById('input-webapp-url') as HTMLInputElement).value = getWebAppUrl();
+			(document.getElementById('input-secret') as HTMLInputElement).value = getSecret();
 			UIUtils.showModal('modal-settings');
 		});
 
@@ -423,7 +425,8 @@ class CheckoutApp {
 
 		document.getElementById('btn-save-settings')?.addEventListener('click', () => {
 			const url = (document.getElementById('input-webapp-url') as HTMLInputElement).value.trim();
-			saveWebAppUrl(url);
+			const secret = (document.getElementById('input-secret') as HTMLInputElement).value.trim();
+			saveSettings(url, secret);
 			UIUtils.hideModal('modal-settings');
 			UIUtils.showToast('設定已儲存');
 		});

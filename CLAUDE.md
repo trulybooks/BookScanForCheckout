@@ -43,6 +43,33 @@ payload means changing both.
 - ISBN is written with a text number format. Without it Google turns a 13-digit ISBN into
   `9.78986E+12`.
 
+## Security posture — read before changing anything here
+
+This is a public static page talking to a public Apps Script endpoint. That shape **cannot
+have strong authentication**, so the design is about limiting blast radius, and a few rules
+hold it together:
+
+- **No spreadsheet ID for the checkout sheet lives in this repo.** It is filled in inside the
+  Apps Script project, which sits in the shop's own Google account. It was committed here once
+  by mistake; the sheet is readable by anyone with the link and carries 姓名, 信箱, 會員編號 and
+  成本, so publishing the ID in a public repo exposed customer data. Treat that ID as leaked
+  (it is in this repo's git history) — the real remedy is the sheet's sharing setting.
+- **The Web App URL and the shared secret never enter the repo, a commit, or a screenshot.**
+  They live only in the till device's `localStorage`. Together they are the write credential.
+- **The catalogue sheet ID is unavoidably public** (`catalog.ts`) — the browser fetches it
+  directly. That sheet carries 庫存數量 and 累積銷售, which the website doesn't publish. Any
+  client-side design has this property; moving it would mean adding a backend.
+- `checkout_append.gs` **fails closed**: unfilled `SPREADSHEET_ID` or `SHARED_SECRET` throws
+  rather than running, so a half-configured deploy can't become an open endpoint.
+- The write path can only **append**. `findWritableRows_` takes rows where ISBN and 商品 are
+  both empty, so existing orders are never overwritten, nothing is deleted, and no sheet
+  content is returned to the caller. A leaked credential means junk rows, not data loss or
+  data theft.
+
+There is no `testAppend()` any more. It wrote a row into the live sales ledger and asked the
+operator to delete it afterwards — the production ledger is not a test fixture. `testConnection()`
+replaces it and only reports which rows would be used.
+
 ## Store credit
 
 `pricing.ts`. Tiers are on the **used-book subtotal for the whole order** — not per book, and

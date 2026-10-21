@@ -311,6 +311,12 @@ main {
 	box-shadow: 0 0 0 3px rgba(140, 123, 108, 0.12);
 }
 
+.modal-content .warn {
+	color: var(--danger);
+	border-left: 3px solid rgba(156, 74, 63, 0.35);
+	padding-left: 10px;
+}
+
 .modal-actions {
 	display: flex;
 	gap: 10px;

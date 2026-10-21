@@ -121,8 +121,12 @@
 				<h4>寫入 Google Sheet</h4>
 				<input type="text" id="input-webapp-url" class="input-text"
 					placeholder="Apps Script Web App 網址（…/exec）">
+				<input type="password" id="input-secret" class="input-text"
+					placeholder="共用密鑰（與 .gs 裡的 SHARED_SECRET 相同）">
 				<p>部署方式見 <code>apps_script/checkout_append.gs</code> 開頭的說明。沒填網址時仍可算帳，
 					但不會寫進試算表。</p>
+				<p class="warn">⚠️ 網址與密鑰合起來等同這張試算表的寫入密碼，只存在這台裝置。
+					不要貼進程式碼、截圖或訊息裡。</p>
 				<div class="modal-actions">
 					<button id="btn-cancel-settings" class="btn btn-secondary">取消</button>
 					<button id="btn-save-settings" class="btn btn-primary">儲存</button>
