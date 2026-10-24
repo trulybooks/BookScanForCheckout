@@ -273,7 +273,7 @@ class CheckoutApp {
 		const url = getWebAppUrl();
 		const secret = getSecret();
 		const outcome: SubmitOutcome = url
-			? await submitOrder(url, secret, name, items)
+			? await submitOrder(url, secret, name, carrier, items)
 			: { status: 'error', message: '尚未設定 Apps Script 網址，這一單沒有寫進試算表。' };
 
 		this.renderResult(name, carrier, books, totals, outcome);

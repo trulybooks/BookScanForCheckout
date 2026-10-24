@@ -66,9 +66,10 @@ export async function submitOrder(
 	webAppUrl: string,
 	secret: string,
 	name: string,
+	carrier: string,
 	items: OrderItem[]
 ): Promise<SubmitOutcome> {
-	const body = JSON.stringify({ secret, name, items });
+	const body = JSON.stringify({ secret, name, carrier, items });
 
 	try {
 		const res = await fetch(webAppUrl, {

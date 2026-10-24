@@ -42,9 +42,10 @@ var SHEET_GID = 679387958;
 var HEADER_ROW = 2;
 var FIRST_DATA_ROW = 3;
 
-// 1-indexed 欄位位置。只寫這四欄，其餘維持原樣。
-var COL_NAME = 3;    // C 姓名
-var COL_ISBN = 6;    // F ISBN
+// 1-indexed 欄位位置。只寫這五欄，其餘維持原樣。
+var COL_NAME = 3;     // C 姓名
+var COL_CARRIER = 4;  // D 會員編號/發票（發票載具編號）
+var COL_ISBN = 6;     // F ISBN
 var COL_ITEM = 7;    // G 商品
 var COL_PRICE = 9;   // I 單價
 //
@@ -110,7 +111,7 @@ function findWritableRows_(sheet, count) {
   return rows;
 }
 
-function appendOrder_(name, items) {
+function appendOrder_(name, carrier, items) {
   if (!items || !items.length) throw new Error('沒有要寫入的書');
   if (items.length > MAX_ITEMS) throw new Error('一次最多 ' + MAX_ITEMS + ' 本');
 
@@ -122,6 +123,13 @@ function appendOrder_(name, items) {
     var item = items[i];
 
     sheet.getRange(row, COL_NAME).setValue(name);
+
+    // 載具是整單共用的，跟姓名一樣每一列都填，店主看任何一列都知道這單開給誰。
+    // 設成純文字：載具以 / 開頭，Google 會把它當成公式而噴 #ERROR!
+    if (carrier) {
+      sheet.getRange(row, COL_CARRIER).setNumberFormat('@').setValue(String(carrier));
+    }
+
     // ISBN 設成純文字，否則 Google 會把 13 位數字轉成 9.78986E+12
     sheet.getRange(row, COL_ISBN).setNumberFormat('@').setValue(String(item.isbn || ''));
     sheet.getRange(row, COL_ITEM).setValue(String(item.title || ''));
@@ -152,7 +160,7 @@ function doPost(e) {
     var name = String(data.name || '').trim();
     if (!name) throw new Error('缺少購買人姓名');
 
-    var rows = appendOrder_(name, data.items);
+    var rows = appendOrder_(name, String(data.carrier || '').trim(), data.items);
     return json_({ status: 'ok', rows: rows, count: rows.length });
   } catch (err) {
     return json_({ status: 'error', message: String(err && err.message || err) });

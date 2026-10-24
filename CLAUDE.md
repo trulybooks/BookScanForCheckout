@@ -37,7 +37,11 @@ payload means changing both.
 - **Rows below the data are pre-filled** with 訂單編號, 購買日期, 數量, 付款方式 and more, by
   formula. So `getLastRow() + 1` lands a hundred rows past where the order belongs. The script
   finds the first row where **both ISBN and 商品 are empty** instead.
-- Only four columns are written: 姓名 (C), ISBN (F), 商品 (G), 單價 (I).
+- Only five columns are written: 姓名 (C), 會員編號/發票 (D), ISBN (F), 商品 (G), 單價 (I).
+  姓名 and the invoice carrier belong to the order, not the book, so they repeat on every row
+  of the order — the shop reads any single row and knows who it was for.
+- **The carrier is written as text.** It starts with `/`, which Google otherwise takes for the
+  start of a formula and renders as `#ERROR!`.
 - **Never write 金額 (J).** It is a formula, 數量 × 單價 — filling 單價 makes it compute on its
   own, and writing a value there destroys it for that row.
 - ISBN is written with a text number format. Without it Google turns a 13-digit ISBN into
