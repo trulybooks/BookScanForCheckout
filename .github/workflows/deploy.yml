@@ -46,6 +46,12 @@ jobs:
         run: |
           mkdir -p _site
           cp -R index.html styles.css img dist _site/
+          # 幫 CSS／JS 網址加上 commit 版本號。Pages 一律送 max-age=600，手機重新整理
+          # 時主頁面會重抓，但 CSS／JS 會直接沿用舊快取最多 10 分鐘——部署完在手機上
+          # 看到的還是舊版，修了等於沒修。網址變了就一定會抓新的。
+          V="${GITHUB_SHA::7}"
+          sed -i "s#href=\"styles.css\"#href=\"styles.css?v=$V\"#; s#src=\"dist/bundle.js\"#src=\"dist/bundle.js?v=$V\"#" _site/index.html
+          grep -q "bundle.js?v=$V" _site/index.html || { echo "::error::版本號沒有加進 index.html"; exit 1; }
           echo "--- _site 內容 ---"
           du -sh _site
           ls -R _site | head -30
