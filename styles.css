@@ -602,6 +602,14 @@ main {
 	position: relative;
 	width: 100%;
 	max-width: 460px;
+	/* 整張卡片一定塞得進螢幕，取消鍵才按得到。dvh 會扣掉 iOS Safari 的網址列與
+	   工具列；不支援 dvh 的瀏覽器退回 vh。真的還是太矮（例如橫拿）就讓卡片捲動。 */
+	max-height: calc(100vh - 32px);
+	max-height: calc(100dvh - 32px);
+	overflow-y: auto;
+	/* 影片高度上限 = 卡片可用高度扣掉標題、狀態列、取消鍵與間距（約 240px） */
+	--scan-video-max-h: max(200px, calc(100vh - 290px));
+	--scan-video-max-h: max(200px, calc(100dvh - 290px));
 	background: var(--light);
 	border-radius: 2px;
 	box-shadow: var(--shadow-modal);

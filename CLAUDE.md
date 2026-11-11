@@ -102,6 +102,18 @@ formats and the validator, because the till scans two unrelated things. ISBNs ar
 friends; **invoice carriers are Code 39** (`/` plus 7 characters). Decoding both at once invites
 misreads, e.g. a carrier whose payload happens to be 8 digits.
 
+**The carrier format must be `Code39Std`, not `Code39`.** Plain `Code39` lets zxing also try
+Full ASCII (extended) mode, which treats `/A`–`/O` and `/Z` as escape pairs for punctuation:
+`/CFVXNN5` came back as `#FVXNN5` and the validator rejected it, so on the phone the carrier
+simply never scanned. In a carrier the `/` is a literal slash. Found with real screenshots of
+failed scans.
+
+The scan overlay caps the video's height (`--scan-video-max-h` on `.scan-card`) because phone
+cameras deliver portrait frames, and at full width the video pushed the cancel button off the
+bottom of the screen. The wrapper is `fit-content` around the video so the scan box still sits
+exactly over the region being decoded — don't swap this for `object-fit: cover`, which crops
+what you see but not what gets decoded.
+
 ## Commands
 
 ```bash

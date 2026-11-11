@@ -22,9 +22,13 @@ const READER_OPTIONS: Record<ScanTarget, ReaderOptions> = {
 		formats: ['EAN13', 'EAN8', 'UPCA', 'UPCE', 'Code128'],
 		tryHarder: true
 	},
-	// 手機條碼載具印的是 Code 39
+	// 手機條碼載具印的是 Code 39，而且必須是「標準」模式。
+	// 只寫 'Code39' 的話 zxing 會連 Full ASCII 擴充模式一起試，那個模式把
+	// `/A`–`/O`、`/Z` 當成跳脫序列翻譯成標點——`/CFVXNN5` 被讀成 `#FVXNN5`，
+	// 再被下面的驗證擋掉，畫面上就是「一直對不到」。載具的 `/` 是字面上的斜線，
+	// 不是跳脫字元。（用 掃描失敗的條碼/ 裡的實機截圖驗證過。）
 	carrier: {
-		formats: ['Code39'],
+		formats: ['Code39Std'],
 		tryHarder: true
 	}
 };
@@ -160,9 +164,16 @@ export class ScannerService {
 
 		// Wrapper keeps the scan-box overlay aligned with the video regardless
 		// of the container's own size.
+		//
+		// 手機相機給的是直式影像，寬度撐滿的話高度會超過螢幕，把下面的按鈕擠出畫面。
+		// 所以影片以 --scan-video-max-h 限高、寬度依比例縮，wrapper 貼著影片的實際
+		// 大小（fit-content），掃描框的百分比才會繼續對準真正被解碼的區域。
+		// 不能用 object-fit: cover 裁畫面：那樣看到的與解碼的範圍會對不上。
 		const wrapper = document.createElement('div');
 		wrapper.style.position = 'relative';
-		wrapper.style.width = '100%';
+		wrapper.style.width = 'fit-content';
+		wrapper.style.maxWidth = '100%';
+		wrapper.style.margin = '0 auto';
 
 		const video = document.createElement('video');
 		// playsinline is required on iOS or the video hijacks the whole screen
@@ -170,7 +181,9 @@ export class ScannerService {
 		video.muted = true;
 		video.srcObject = this.stream;
 		video.style.display = 'block';
-		video.style.width = '100%';
+		video.style.width = 'auto';
+		video.style.maxWidth = '100%';
+		video.style.maxHeight = 'var(--scan-video-max-h, none)';
 		wrapper.appendChild(video);
 
 		const overlay = document.createElement('div');
