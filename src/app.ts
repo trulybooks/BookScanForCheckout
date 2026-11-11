@@ -350,7 +350,7 @@ class CheckoutApp {
 
 		try {
 			await this.scanner.startScanner('reader', (code) => this.handleScanned(code), target);
-			this.setScanStatus(target === 'carrier' ? '對準載具條碼' : '對準書背的條碼');
+			this.setScanStatus(target === 'carrier' ? '對準載具條碼，手機離遠一點才對得到焦' : '對準書背的條碼');
 		} catch (error) {
 			console.error(error);
 			this.setScanStatus((error as Error).message);

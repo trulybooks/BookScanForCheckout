@@ -49,6 +49,30 @@ const VALIDATORS: Record<ScanTarget, (code: string) => boolean> = {
 	carrier: isValidCarrier
 };
 
+/**
+ * 載具模式把鏡頭放大約 2 倍。
+ *
+ * 載具卡很小，大家會把手機貼很近去拍，但新款 iPhone 主鏡頭的最短對焦距離約
+ * 15–20cm，貼太近整條碼就糊掉（內建相機會自動切微距，網頁拿不到）。實機截圖
+ * 掃描失敗的條碼/image.jpg 就是這樣：細線都有疊影，任何解碼參數都救不回來。
+ * 放大之後，條碼要佔滿掃描框得把手機拿遠一點，自然回到對得到焦的距離。
+ *
+ * 只在瀏覽器回報支援 zoom 時才套用，不支援就照舊；失敗也不影響掃描。
+ */
+const CARRIER_ZOOM = 2;
+
+async function applyCarrierZoom(stream: MediaStream): Promise<void> {
+	const track = stream.getVideoTracks()[0];
+	const caps = (track?.getCapabilities?.() ?? {}) as { zoom?: { min: number; max: number } };
+	if (!track || !caps.zoom) return;
+	const zoom = Math.min(caps.zoom.max, Math.max(caps.zoom.min, CARRIER_ZOOM));
+	try {
+		await track.applyConstraints({ advanced: [{ zoom } as MediaTrackConstraintSet] });
+	} catch (error) {
+		console.warn('Zoom not applied:', error);
+	}
+}
+
 // Central region of the camera frame that gets cropped out and decoded,
 // as fractions of the frame size. Cropping before decoding is essential:
 // zxing fails on a full frame where the barcode is a small part of a busy
@@ -161,19 +185,28 @@ export class ScannerService {
 		}
 
 		this.stream = stream;
+		if (target === 'carrier') await applyCarrierZoom(stream);
 
-		// Wrapper keeps the scan-box overlay aligned with the video regardless
-		// of the container's own size.
+		// 手機相機給的是直式影像，寬度撐滿的話影片比螢幕還高：掃描框（影片正中間，
+		// 也是唯一被解碼的區域）會掉到螢幕外，結帳的取消鍵也被擠出畫面。
 		//
-		// 手機相機給的是直式影像，寬度撐滿的話高度會超過螢幕，把下面的按鈕擠出畫面。
-		// 所以影片以 --scan-video-max-h 限高、寬度依比例縮，wrapper 貼著影片的實際
-		// 大小（fit-content），掃描框的百分比才會繼續對準真正被解碼的區域。
-		// 不能用 object-fit: cover 裁畫面：那樣看到的與解碼的範圍會對不上。
+		// 作法：影片維持原比例、寬度撐滿，外層 wrapper 以 --scan-video-max-h 限高並
+		// 裁掉上下，flex 置中讓看到的是畫面正中間那一段。掃描框放在 inner 裡，inner 的
+		// 大小就是完整影片，所以框的百分比仍然精準對應被解碼的區域，而且一定在可視範圍中間。
+		// （試過把影片整個縮小塞進去，兩側留一大片黑邊，實機上很難看。）
 		const wrapper = document.createElement('div');
 		wrapper.style.position = 'relative';
-		wrapper.style.width = 'fit-content';
-		wrapper.style.maxWidth = '100%';
-		wrapper.style.margin = '0 auto';
+		wrapper.style.width = '100%';
+		wrapper.style.maxHeight = 'var(--scan-video-max-h, none)';
+		wrapper.style.overflow = 'hidden';
+		wrapper.style.display = 'flex';
+		wrapper.style.alignItems = 'center';
+
+		const inner = document.createElement('div');
+		inner.style.position = 'relative';
+		inner.style.width = '100%';
+		inner.style.flexShrink = '0';
+		wrapper.appendChild(inner);
 
 		const video = document.createElement('video');
 		// playsinline is required on iOS or the video hijacks the whole screen
@@ -181,10 +214,8 @@ export class ScannerService {
 		video.muted = true;
 		video.srcObject = this.stream;
 		video.style.display = 'block';
-		video.style.width = 'auto';
-		video.style.maxWidth = '100%';
-		video.style.maxHeight = 'var(--scan-video-max-h, none)';
-		wrapper.appendChild(video);
+		video.style.width = '100%';
+		inner.appendChild(video);
 
 		const overlay = document.createElement('div');
 		overlay.style.position = 'absolute';
@@ -196,7 +227,7 @@ export class ScannerService {
 		overlay.style.borderRadius = '8px';
 		overlay.style.boxShadow = '0 0 0 4000px rgba(0, 0, 0, 0.35)';
 		overlay.style.pointerEvents = 'none';
-		wrapper.appendChild(overlay);
+		inner.appendChild(overlay);
 
 		container.innerHTML = '';
 		container.appendChild(wrapper);
@@ -237,8 +268,17 @@ export class ScannerService {
 			if (this.videoEl.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && this.videoEl.videoWidth > 0) {
 				const vw = this.videoEl.videoWidth;
 				const vh = this.videoEl.videoHeight;
+				// 影片上下被 wrapper 裁掉時，掃描框與解碼範圍都不能超出看得到的那一段，
+				// 否則框線被切掉、使用者也不知道該對哪裡。大部分手機不會碰到這個上限。
+				const visible = inner.clientHeight > 0 ? wrapper.clientHeight / inner.clientHeight : 1;
+				const regionH = Math.min(SCAN_REGION.height, visible * 0.9);
+				const topPct = `${((1 - regionH) / 2) * 100}%`;
+				if (overlay.style.top !== topPct) {
+					overlay.style.top = topPct;
+					overlay.style.height = `${regionH * 100}%`;
+				}
 				const cw = Math.floor(vw * SCAN_REGION.width);
-				const ch = Math.floor(vh * SCAN_REGION.height);
+				const ch = Math.floor(vh * regionH);
 				const cx = Math.floor((vw - cw) / 2);
 				const cy = Math.floor((vh - ch) / 2);
 

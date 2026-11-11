@@ -108,11 +108,19 @@ Full ASCII (extended) mode, which treats `/A`–`/O` and `/Z` as escape pairs fo
 simply never scanned. In a carrier the `/` is a literal slash. Found with real screenshots of
 failed scans.
 
-The scan overlay caps the video's height (`--scan-video-max-h` on `.scan-card`) because phone
-cameras deliver portrait frames, and at full width the video pushed the cancel button off the
-bottom of the screen. The wrapper is `fit-content` around the video so the scan box still sits
-exactly over the region being decoded — don't swap this for `object-fit: cover`, which crops
-what you see but not what gets decoded.
+The scan view is height-capped (`--scan-video-max-h` on `.scan-card`) because phone cameras
+deliver portrait frames, and at full width the video pushed the cancel button off the screen.
+The video keeps its full width and natural aspect; the wrapper clips the top and bottom and
+flex-centres it, so what shows is the middle band. The scan box lives in an inner element that
+is exactly the full video, so its percentages still map onto the decoded region — and on short
+screens the scan loop shrinks both the box and the decoded crop to fit the visible band.
+Shrinking the whole video to fit was tried first and left wide black bars; it looked wrong on a
+phone. Don't use `object-fit: cover` on the video itself either: the box would stop matching.
+
+**Carrier mode zooms to 2× where the browser supports `zoom`.** People hold the small carrier
+card very close, inside the minimum focus distance of recent iPhones' main camera, and the bars
+blur past what any decoder setting recovers (`掃描失敗的條碼/image.jpg`, ten option sets tried).
+Zooming makes them hold it further back. ISBN mode is left at 1×; it already scans well.
 
 ## Commands
 
