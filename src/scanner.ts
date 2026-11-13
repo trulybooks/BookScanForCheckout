@@ -1,4 +1,5 @@
 import { prepareZXingModule, readBarcodes, type ReaderOptions } from 'zxing-wasm/reader';
+import { findLabelSpan } from './labelCrop.js';
 
 // Serve the wasm binary from our own dist/ (copied there by the build script)
 // instead of the default CDN, so scanning works without third-party fetches.
@@ -287,7 +288,18 @@ export class ScannerService {
 				ctx.drawImage(this.videoEl, cx, cy, cw, ch, 0, 0, cw, ch);
 
 				try {
-					const results = await readBarcodes(ctx.getImageData(0, 0, cw, ch), READER_OPTIONS[target]);
+					const frame = ctx.getImageData(0, 0, cw, ch);
+					let results = await readBarcodes(frame, READER_OPTIONS[target]);
+
+					// 讀不到時，若畫面裡有條碼標籤，就只框住標籤再試一次。專治條碼印在小白
+					// 標籤上、外面緊接彩色封面的書——zxing 會因為「兩側沒有空白區」拒讀。
+					// 詳見 labelCrop.ts。
+					if (!results.some(r => r.isValid)) {
+						const span = findLabelSpan(frame);
+						if (span) {
+							results = await readBarcodes(ctx.getImageData(span.x, span.y, span.w, span.h), READER_OPTIONS[target]);
+						}
+					}
 
 					let found: string | null = null;
 					for (const result of results) {

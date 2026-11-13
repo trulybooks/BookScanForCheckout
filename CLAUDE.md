@@ -102,6 +102,16 @@ formats and the validator, because the till scans two unrelated things. ISBNs ar
 friends; **invoice carriers are Code 39** (`/` plus 7 characters). Decoding both at once invites
 misreads, e.g. a carrier whose payload happens to be 8 digits.
 
+**Barcodes on a tight white label over a coloured cover need a second pass** (`labelCrop.ts`).
+EAN-13 requires a quiet zone either side; some publishers print the code on a small white label
+that leaves about two modules before a mid-tone cover begins, and zxing rejects it. Cropping so
+the image edge sits on the label edge makes zxing accept it, so when a frame decodes nothing the
+loop finds the label's left/right edges and retries on just that rectangle. It changes no
+pixels — contrast-curve preprocessing was tried and produced checksum-valid **wrong** ISBNs.
+Tested on `掃描失敗的條碼/isbn_fail.jpg` (9786263615250, green cover) at several framings and
+scales, on frames with no barcode (nothing read), and on 300 degraded synthetic EAN-13s
+(274 retried, 0 misreads).
+
 **The carrier format must be `Code39Std`, not `Code39`.** Plain `Code39` lets zxing also try
 Full ASCII (extended) mode, which treats `/A`–`/O` and `/Z` as escape pairs for punctuation:
 `/CFVXNN5` came back as `#FVXNN5` and the validator rejected it, so on the phone the carrier
