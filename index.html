@@ -35,23 +35,6 @@
 					<h1>結帳</h1>
 				</div>
 
-				<div class="field-group">
-					<label class="field">
-						<span class="field-label">購買人姓名 ＊</span>
-						<input type="text" id="input-name" class="input-text" autocomplete="off"
-							placeholder="結帳者姓名">
-					</label>
-
-					<div class="field">
-						<span class="field-label">發票載具編號</span>
-						<div class="field-with-btn">
-							<input type="text" id="input-carrier" class="input-text" autocomplete="off"
-								placeholder="/ABC1234" maxlength="8">
-							<button id="btn-scan-carrier" class="btn-scan" aria-label="掃描載具條碼">📷</button>
-						</div>
-					</div>
-				</div>
-
 				<div class="books-head">
 					<span class="eyebrow">Books</span>
 					<span id="book-count" class="book-count"></span>
@@ -76,6 +59,29 @@
 
 				<div id="review-list" class="review-list"></div>
 				<div id="totals" class="totals"></div>
+
+				<!-- 先看完書與金額，再填購買人資訊 -->
+				<div class="books-head">
+					<span class="eyebrow">Buyer</span>
+				</div>
+				<div class="field-group">
+					<label class="field">
+						<span class="field-label">購買人姓名 ＊</span>
+						<input type="text" id="input-name" class="input-text" autocomplete="off"
+							placeholder="結帳者姓名">
+					</label>
+
+					<div class="field">
+						<span class="field-label">發票載具編號</span>
+						<div class="field-with-btn">
+							<input type="text" id="input-carrier" class="input-text" autocomplete="off"
+								placeholder="/ABC1234" maxlength="8">
+							<button id="btn-scan-carrier" class="btn-scan" aria-label="掃描載具條碼">📷</button>
+						</div>
+					</div>
+				</div>
+
+				<div id="review-error" class="form-error hidden"></div>
 
 				<div class="action-row">
 					<button id="btn-back-form" class="btn btn-secondary btn-large">← 回去修改</button>
@@ -133,6 +139,9 @@
 				</div>
 			</div>
 		</div>
+
+		<!-- 拍封面：capture 讓手機直接開相機，不經過相簿選單。所有書共用這一個 input。 -->
+		<input type="file" id="input-cover" accept="image/*" capture="environment" hidden>
 
 		<div id="toast" class="toast"></div>
 	</div>

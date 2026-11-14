@@ -432,6 +432,35 @@ main {
 /* ---------- 確認明細 ---------- */
 .review-list { display: flex; flex-direction: column; gap: 12px; }
 
+/* 書封拍照。按鈕一律 rounded-full（DESIGN_GUIDE），縮圖是卡片類，2px。 */
+.btn-photo {
+	align-self: flex-start;
+	min-height: var(--tap-target-min);
+	padding: 0 16px;
+	background: var(--bg-surface);
+	border: 1px solid var(--border);
+	border-radius: 9999px;
+	font: inherit;
+	font-size: 0.85rem;
+	color: var(--primary);
+	cursor: pointer;
+	transition: all 0.3s ease;
+	-webkit-tap-highlight-color: transparent;
+}
+.btn-photo:hover, .btn-photo:active { background: var(--bg-tint); border-color: var(--primary); }
+.btn-photo--done { background: var(--bg-tint); color: var(--secondary); }
+.btn-photo--ghost { border-color: transparent; background: none; color: var(--secondary); }
+.photo-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.photo-thumb {
+	width: 56px;
+	height: 74px;
+	object-fit: cover;
+	border-radius: 2px;
+	border: 1px solid var(--border);
+	background: var(--bg-deep);
+}
+#result-photos { display: flex; flex-direction: column; gap: 10px; }
+
 .review-item {
 	display: grid;
 	grid-template-columns: 22px minmax(0, 1fr);

@@ -3,6 +3,7 @@ import { UIUtils } from './utils.js';
 import { Catalog, CatalogBook, normalizeISBN } from './catalog.js';
 import { calculateTotals, OrderTotals } from './pricing.js';
 import { getWebAppUrl, getSecret, saveSettings, submitOrder, OrderItem, SubmitOutcome } from './sheet.js';
+import { CoverPhoto, nameCoverFile, saveCoverToDevice } from './coverPhoto.js';
 
 /** 表單上的一列書。查詢前只有店員輸入的內容。 */
 interface BookRow {
@@ -26,6 +27,11 @@ class CheckoutApp {
 	private rows: BookRow[] = [];
 	private nextRowId = 1;
 	private scanInto: ScanInto | null = null;
+
+	/** 每本書的封面照，以 BookRow.id 為 key。只在記憶體裡，開始下一單就清掉。 */
+	private photos = new Map<number, CoverPhoto>();
+	/** 正在幫哪一本拍（共用一個 file input，所以要記住是誰按的） */
+	private photoFor: number | null = null;
 
 	constructor() {
 		this.bindEvents();
@@ -126,12 +132,7 @@ class CheckoutApp {
 	private handleLookup(): void {
 		this.clearFormError();
 
-		const name = (document.getElementById('input-name') as HTMLInputElement)?.value.trim() ?? '';
-		if (!name) {
-			this.showFormError('請填寫購買人姓名。');
-			return;
-		}
-
+		// 購買人資訊改到確認畫面、看完書與金額之後才填，這裡只檢查書。
 		// 兩欄都空的列當成沒填，直接略過，不要因此擋住整單
 		const filled = this.rows.filter(r => r.isbn.trim() !== '' || r.title.trim() !== '');
 		if (filled.length === 0) {
@@ -178,6 +179,7 @@ class CheckoutApp {
 						<div class="review-body">
 							<p class="review-typed">${UIUtils.escapeHtml(typed)}</p>
 							<p class="review-note review-note--warn">書目裡查不到，這一筆不會計入金額，也不會寫進試算表。</p>
+							${this.photoBlock(row)}
 						</div>
 					</div>`;
 			}
@@ -207,9 +209,17 @@ class CheckoutApp {
 							? `<p class="review-note${needsPick ? ' review-note--warn' : ''}">找到 ${row.candidates.length} 本相符，請選一本${needsPick ? '（尚未選擇）' : ''}</p>`
 							: ''}
 						<div class="candidates">${options}</div>
+						${this.photoBlock(row)}
 					</div>
 				</div>`;
 		}).join('');
+
+		list.querySelectorAll<HTMLButtonElement>('[data-photo]').forEach(btn => {
+			btn.addEventListener('click', () => this.takePhoto(Number(btn.dataset.photo)));
+		});
+		list.querySelectorAll<HTMLButtonElement>('[data-save-photo]').forEach(btn => {
+			btn.addEventListener('click', () => this.savePhoto(Number(btn.dataset.savePhoto)));
+		});
 
 		list.querySelectorAll<HTMLInputElement>('input[data-pick]').forEach(input => {
 			input.addEventListener('change', () => {
@@ -260,6 +270,17 @@ class CheckoutApp {
 		if (books.length === 0) return;
 
 		const name = (document.getElementById('input-name') as HTMLInputElement)?.value.trim() ?? '';
+		const reviewError = document.getElementById('review-error');
+		if (!name) {
+			if (reviewError) {
+				reviewError.textContent = '請填寫購買人姓名。';
+				reviewError.classList.remove('hidden');
+			}
+			document.getElementById('input-name')?.focus();
+			return;
+		}
+		reviewError?.classList.add('hidden');
+
 		const carrier = (document.getElementById('input-carrier') as HTMLInputElement)?.value.trim() ?? '';
 		const totals = calculateTotals(books);
 		const items: OrderItem[] = books.map(b => ({ isbn: b.isbn, title: b.title, price: b.price }));
@@ -322,17 +343,113 @@ class CheckoutApp {
 			<div class="totals">
 				<div class="total-line total-line--main"><span>應付總額</span><span id="result-total">${money(totals.total)}</span></div>
 				<div class="credit"><span class="credit-label">贈送購物金</span><span class="credit-value" id="result-credit">${money(totals.credit)}</span></div>
-			</div>`;
+			</div>
+			<div id="result-photos"></div>`;
+		this.renderResultPhotos();
 	}
 
 	private resetOrder(): void {
+		const unsaved = this.unsavedPhotoCount();
+		if (unsaved > 0 && !confirm(`有 ${unsaved} 張封面還沒存到相簿，開始下一單就會清掉。確定嗎？`)) return;
+		this.clearPhotos();
+
 		this.rows = [];
 		this.nextRowId = 1;
 		this.addRow();
 		(document.getElementById('input-name') as HTMLInputElement).value = '';
 		(document.getElementById('input-carrier') as HTMLInputElement).value = '';
 		this.clearFormError();
+		document.getElementById('review-error')?.classList.add('hidden');
 		this.switchView('view-form');
+	}
+
+	// ======================== 書封拍照 ========================
+
+	private photoBlock(row: BookRow): string {
+		const photo = this.photos.get(row.id);
+		if (!photo) {
+			return `<button class="btn-photo" data-photo="${row.id}">📸 拍封面</button>`;
+		}
+		return `
+			<div class="photo-row">
+				<img class="photo-thumb" src="${photo.url}" alt="第 ${row.id} 本的封面">
+				<button class="btn-photo${photo.saved ? ' btn-photo--done' : ''}" data-save-photo="${row.id}">
+					${photo.saved ? '✓ 已存' : '存到相簿'}
+				</button>
+				<button class="btn-photo btn-photo--ghost" data-photo="${row.id}">重拍</button>
+			</div>`;
+	}
+
+	private takePhoto(rowId: number): void {
+		const input = document.getElementById('input-cover') as HTMLInputElement | null;
+		if (!input) return;
+		this.photoFor = rowId;
+		input.value = ''; // 同一本重拍也要觸發 change
+		input.click();
+	}
+
+	private handlePhotoTaken(file: File | undefined): void {
+		const rowId = this.photoFor;
+		this.photoFor = null;
+		if (!file || rowId === null) return;
+
+		const row = this.rows.find(r => r.id === rowId);
+		const book = row?.candidates && row.selected !== null ? row.candidates[row.selected] : null;
+		const named = nameCoverFile(file, book?.isbn || row?.isbn.trim() || '');
+
+		const old = this.photos.get(rowId);
+		if (old) URL.revokeObjectURL(old.url);
+		this.photos.set(rowId, { file: named, url: URL.createObjectURL(named), saved: false });
+		this.renderReview();
+	}
+
+	private async savePhoto(rowId: number): Promise<void> {
+		const photo = this.photos.get(rowId);
+		if (!photo) return;
+		try {
+			const outcome = await saveCoverToDevice(photo.file);
+			if (outcome === 'cancelled') return;
+			photo.saved = true;
+			this.renderReview();
+			this.renderResultPhotos();
+			if (outcome === 'downloaded') UIUtils.showToast('已下載封面照片', 2000);
+		} catch (error) {
+			console.error(error);
+			UIUtils.showToast('存照片失敗，請再按一次', 3000);
+		}
+	}
+
+	/**
+	 * 完成畫面上列出還沒存的封面，就地存。不讓店員回到明細去存：那裡有「確認送出」，
+	 * 回去再按一次就會重複寫入試算表。
+	 */
+	private renderResultPhotos(): void {
+		const box = document.getElementById('result-photos');
+		if (!box) return;
+		const unsaved = this.rows.filter(r => this.photos.get(r.id) && !this.photos.get(r.id)!.saved);
+		if (unsaved.length === 0) {
+			box.innerHTML = '';
+			return;
+		}
+		box.innerHTML = `
+			<div class="banner banner--warn">有 ${unsaved.length} 張封面還沒存到相簿，開始下一單就會清掉。</div>
+			${unsaved.map(r => this.photoBlock(r)).join('')}`;
+		box.querySelectorAll<HTMLButtonElement>('[data-save-photo]').forEach(btn => {
+			btn.addEventListener('click', () => this.savePhoto(Number(btn.dataset.savePhoto)));
+		});
+		// 完成畫面不提供重拍：這一單已經送出了
+		box.querySelectorAll('[data-photo]').forEach(btn => btn.remove());
+	}
+
+	private unsavedPhotoCount(): number {
+		let n = 0;
+		this.photos.forEach(p => { if (!p.saved) n++; });
+		return n;
+	}
+
+	private clearPhotos(): void {
+		this.photos.forEach(p => URL.revokeObjectURL(p.url));
+		this.photos.clear();
 	}
 
 	// ======================== 掃描 ========================
@@ -405,6 +522,10 @@ class CheckoutApp {
 		document.getElementById('btn-back-form')?.addEventListener('click', () => this.switchView('view-form'));
 		document.getElementById('btn-submit')?.addEventListener('click', () => this.handleSubmit());
 		document.getElementById('btn-new-order')?.addEventListener('click', () => this.resetOrder());
+
+		document.getElementById('input-cover')?.addEventListener('change', (e) => {
+			this.handlePhotoTaken((e.target as HTMLInputElement).files?.[0]);
+		});
 
 		document.getElementById('btn-scan-carrier')?.addEventListener('click', () => {
 			this.openScanner({ kind: 'carrier' });

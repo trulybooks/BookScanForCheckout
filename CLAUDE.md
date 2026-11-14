@@ -7,6 +7,31 @@ catalogue, works out the store credit, and writes the order back to the checkout
 Mobile-friendly static web app. No backend and no build-time secrets — TypeScript bundled with
 esbuild, deployed as static files to GitHub Pages on every push to `main`.
 
+## The flow, and why it's in this order
+
+1. **Books** — ISBN and/or title per row, scan button per row. No buyer details here.
+2. **Confirm** — candidates to pick, totals and store credit, a cover photo per book, and only
+   *then* the buyer's name and invoice carrier. The shop wants the books and the money settled
+   before asking who's paying. The name is validated on submit, not on lookup.
+3. **Done** — write result, and any cover photos not yet saved.
+
+### Cover photos (`coverPhoto.ts`)
+
+The owner keeps a photo of every sold book's cover, on the phone only. Nothing is uploaded or
+processed. Two browser limits shape it:
+
+- A web page can't launch the iOS Camera app. `<input type=file accept=image/* capture=environment>`
+  opens the system camera directly, which is as close as it gets. One input is shared by all rows.
+- A photo taken that way is **not** in the Photos library — it's just a file handed to the page,
+  and a page can't write to Photos silently. Saving goes through `navigator.share` (the share
+  sheet's 儲存影像), which needs a user tap, so it's a separate 存到相簿 button; calling it from
+  the input's `change` event fails on iOS because the gesture has expired. Browsers that can't
+  share files fall back to a download.
+
+Photos live in memory keyed by row id. The Done screen lists unsaved ones to save in place —
+not by sending the operator back to Confirm, whose 確認送出 would write the order twice — and
+開始下一單 asks before discarding unsaved photos.
+
 ## Where the data lives
 
 Two different Google Sheets, and they are reached in two different ways.
