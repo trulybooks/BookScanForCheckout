@@ -14,8 +14,20 @@ export interface OrderItem {
 	price: number;
 }
 
+/** 付款方式。字串要跟試算表 M 欄的下拉選項一字不差（「台灣 Pay」有空格）。 */
+export const PAYMENT_OPTIONS = ['現金', '轉帳', '刷卡', '台灣 Pay', '文化幣'] as const;
+export type PaymentMethod = (typeof PAYMENT_OPTIONS)[number];
+
+/** 整單共用的資料。訂單編號與購買日期不在這裡：由 Apps Script 在寫入時產生。 */
+export interface OrderInfo {
+	name: string;
+	carrier: string;
+	payment: PaymentMethod;
+	note: string;
+}
+
 export type SubmitOutcome =
-	| { status: 'ok'; rows: number[] }
+	| { status: 'ok'; rows: number[]; orderId: string; date: string }
 	| { status: 'unconfirmed' }
 	| { status: 'error'; message: string };
 
@@ -65,11 +77,10 @@ export function saveSettings(url: string, secret: string): void {
 export async function submitOrder(
 	webAppUrl: string,
 	secret: string,
-	name: string,
-	carrier: string,
+	order: OrderInfo,
 	items: OrderItem[]
 ): Promise<SubmitOutcome> {
-	const body = JSON.stringify({ secret, name, carrier, items });
+	const body = JSON.stringify({ secret, ...order, items });
 
 	try {
 		const res = await fetch(webAppUrl, {
@@ -84,7 +95,7 @@ export async function submitOrder(
 		}
 
 		const text = await res.text();
-		let parsed: { status?: string; rows?: number[]; message?: string };
+		let parsed: { status?: string; rows?: number[]; orderId?: string; date?: string; message?: string };
 		try {
 			parsed = JSON.parse(text);
 		} catch {
@@ -93,7 +104,14 @@ export async function submitOrder(
 		}
 
 		if (parsed.status === 'ok' && Array.isArray(parsed.rows)) {
-			return { status: 'ok', rows: parsed.rows };
+			// 舊版 Apps Script 不會回 orderId——代表 .gs 還沒重新部署，訂單編號等欄位沒寫進去
+			if (!parsed.orderId) {
+				return {
+					status: 'error',
+					message: `書已寫入第 ${parsed.rows.join('、')} 列，但 Apps Script 還是舊版，訂單編號、日期、付款方式、備註都沒有寫。請重新部署 checkout_append.gs。`
+				};
+			}
+			return { status: 'ok', rows: parsed.rows, orderId: parsed.orderId, date: parsed.date ?? '' };
 		}
 
 		return { status: 'error', message: parsed.message || '寫入失敗（原因不明）' };

@@ -42,17 +42,26 @@ var SHEET_GID = 679387958;
 var HEADER_ROW = 2;
 var FIRST_DATA_ROW = 3;
 
-// 1-indexed 欄位位置。只寫這五欄，其餘維持原樣。
+// 1-indexed 欄位位置。只寫下面這幾欄，其餘維持原樣。
+var COL_ORDER_ID = 1; // A 訂單編號（同一單每一列都是同一個編號）
+var COL_DATE = 2;     // B 購買日期
 var COL_NAME = 3;     // C 姓名
 var COL_CARRIER = 4;  // D 會員編號/發票（發票載具編號）
 var COL_ISBN = 6;     // F ISBN
 var COL_ITEM = 7;    // G 商品
 var COL_PRICE = 9;   // I 單價
+var COL_PAYMENT = 13; // M 付款方式
+var COL_NOTE = 16;    // P 備註
 //
 // ⚠️ 不要寫 J 欄（金額）。那是公式（數量 × 單價），填了 I 欄它就會自己算出來；
 // 直接寫值會把公式蓋掉，之後那一列就不會再跟著變動。
 
 var MAX_ITEMS = 50;
+
+var TIMEZONE = 'Asia/Taipei';
+
+// 跟試算表 M 欄現有的寫法一字不差（「台灣 Pay」中間有空格），否則對不上下拉選單。
+var PAYMENT_OPTIONS = ['現金', '轉帳', '刷卡', '台灣 Pay', '文化幣'];
 
 
 /** 沒設定好就直接拒絕，而不是帶著預設值跑出一個沒有保護的端點。 */
@@ -111,37 +120,117 @@ function findWritableRows_(sheet, count) {
   return rows;
 }
 
-function appendOrder_(name, carrier, items) {
-  if (!items || !items.length) throw new Error('沒有要寫入的書');
-  if (items.length > MAX_ITEMS) throw new Error('一次最多 ' + MAX_ITEMS + ' 本');
+/**
+ * 今天的下一個訂單編號：TB + yymmdd + 三位流水號，例如 TB261115005。
+ *
+ * 只看「已經有書」（ISBN 或商品有填）的列。空白列的 A 欄預先填好了下一個編號
+ * （店裡的表單是這樣準備的），把它們算進來會跳號。
+ */
+function nextOrderId_(sheet) {
+  var prefix = 'TB' + Utilities.formatDate(new Date(), TIMEZONE, 'yyMMdd');
+  var lastRow = sheet.getLastRow();
+  var max = 0;
 
-  var sheet = getSheet_();
-  var rows = findWritableRows_(sheet, items.length);
+  if (lastRow >= FIRST_DATA_ROW) {
+    var height = lastRow - FIRST_DATA_ROW + 1;
+    var ids = sheet.getRange(FIRST_DATA_ROW, COL_ORDER_ID, height, 1).getValues();
+    var isbns = sheet.getRange(FIRST_DATA_ROW, COL_ISBN, height, 1).getValues();
+    var items = sheet.getRange(FIRST_DATA_ROW, COL_ITEM, height, 1).getValues();
 
-  for (var i = 0; i < items.length; i++) {
-    var row = rows[i];
-    var item = items[i];
-
-    sheet.getRange(row, COL_NAME).setValue(name);
-
-    // 載具是整單共用的，跟姓名一樣每一列都填，店主看任何一列都知道這單開給誰。
-    // 設成純文字：載具以 / 開頭，Google 會把它當成公式而噴 #ERROR!
-    if (carrier) {
-      sheet.getRange(row, COL_CARRIER).setNumberFormat('@').setValue(String(carrier));
-    }
-
-    // ISBN 設成純文字，否則 Google 會把 13 位數字轉成 9.78986E+12
-    sheet.getRange(row, COL_ISBN).setNumberFormat('@').setValue(String(item.isbn || ''));
-    sheet.getRange(row, COL_ITEM).setValue(String(item.title || ''));
-
-    var price = Number(item.price);
-    if (isFinite(price) && price > 0) {
-      sheet.getRange(row, COL_PRICE).setValue(price);
+    for (var i = 0; i < height; i++) {
+      var used = String(isbns[i][0]).trim() !== '' || String(items[i][0]).trim() !== '';
+      if (!used) continue;
+      var m = String(ids[i][0]).trim().match(/^TB(\d{6})(\d{3})$/);
+      if (m && 'TB' + m[1] === prefix) max = Math.max(max, Number(m[2]));
     }
   }
 
-  SpreadsheetApp.flush();
-  return rows;
+  if (max >= 999) throw new Error('今天的訂單編號已用完（999）');
+  return prefix + ('00' + (max + 1)).slice(-3);
+}
+
+/**
+ * 寫值會蓋掉該格的公式。一般的逐列公式只影響寫到的那幾列，沒關係；但如果那一欄是
+ * 從上方某格用 ARRAYFORMULA 整片展開的，在中間寫值會讓整欄變成 #REF!。
+ * 唯讀的 CSV 看不出公式，所以寫之前檢查，有就整單拒絕、不冒險。
+ */
+function assertNoArrayFormula_(sheet, cols) {
+  var lastRow = sheet.getLastRow();
+  if (lastRow < FIRST_DATA_ROW) return;
+  var height = lastRow - FIRST_DATA_ROW + 1;
+  for (var c = 0; c < cols.length; c++) {
+    var formulas = sheet.getRange(FIRST_DATA_ROW, cols[c], height, 1).getFormulas();
+    for (var i = 0; i < height; i++) {
+      if (/ARRAYFORMULA/i.test(formulas[i][0])) {
+        throw new Error('第 ' + columnLetter_(cols[c]) + ' 欄第 ' + (FIRST_DATA_ROW + i) +
+          ' 列是 ARRAYFORMULA，寫進去會讓整欄壞掉，這一單沒有寫入。');
+      }
+    }
+  }
+}
+
+function columnLetter_(col) {
+  return String.fromCharCode(64 + col);
+}
+
+function appendOrder_(order) {
+  var items = order.items;
+  if (!items || !items.length) throw new Error('沒有要寫入的書');
+  if (items.length > MAX_ITEMS) throw new Error('一次最多 ' + MAX_ITEMS + ' 本');
+  if (PAYMENT_OPTIONS.indexOf(order.payment) < 0) {
+    throw new Error('付款方式不在選項裡：' + order.payment);
+  }
+
+  // 兩台裝置同時送單時，不鎖的話兩邊會拿到同一個訂單編號、寫到同樣的空白列。
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(20000)) throw new Error('另一單正在寫入，請稍後再送一次');
+
+  try {
+    var sheet = getSheet_();
+    assertNoArrayFormula_(sheet, [COL_ORDER_ID, COL_DATE, COL_PAYMENT, COL_NOTE]);
+
+    var orderId = nextOrderId_(sheet);
+    var date = Utilities.formatDate(new Date(), TIMEZONE, 'yyyy/MM/dd');
+    var rows = findWritableRows_(sheet, items.length);
+
+    for (var i = 0; i < items.length; i++) {
+      var row = rows[i];
+      var item = items[i];
+
+      // 訂單編號、日期、姓名、載具、付款方式、備註都屬於整單，每一列都填，
+      // 店主看任何一列都知道這是哪一單。
+      sheet.getRange(row, COL_ORDER_ID).setValue(orderId);
+      // 用字串寫入，Google 會跟手打一樣把它認成日期
+      sheet.getRange(row, COL_DATE).setValue(date);
+      sheet.getRange(row, COL_NAME).setValue(order.name);
+
+      // 設成純文字：載具以 / 開頭，Google 會把它當成公式而噴 #ERROR!
+      if (order.carrier) {
+        sheet.getRange(row, COL_CARRIER).setNumberFormat('@').setValue(order.carrier);
+      }
+
+      // ISBN 設成純文字，否則 Google 會把 13 位數字轉成 9.78986E+12
+      sheet.getRange(row, COL_ISBN).setNumberFormat('@').setValue(String(item.isbn || ''));
+      sheet.getRange(row, COL_ITEM).setValue(String(item.title || ''));
+
+      var price = Number(item.price);
+      if (isFinite(price) && price > 0) {
+        sheet.getRange(row, COL_PRICE).setValue(price);
+      }
+
+      sheet.getRange(row, COL_PAYMENT).setValue(order.payment);
+
+      // 備註是店員自由輸入的文字，設成純文字，= 開頭也不會被當成公式執行
+      if (order.note) {
+        sheet.getRange(row, COL_NOTE).setNumberFormat('@').setValue(order.note);
+      }
+    }
+
+    SpreadsheetApp.flush();
+    return { rows: rows, orderId: orderId, date: date };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function json_(obj) {
@@ -160,8 +249,20 @@ function doPost(e) {
     var name = String(data.name || '').trim();
     if (!name) throw new Error('缺少購買人姓名');
 
-    var rows = appendOrder_(name, String(data.carrier || '').trim(), data.items);
-    return json_({ status: 'ok', rows: rows, count: rows.length });
+    var result = appendOrder_({
+      name: name,
+      carrier: String(data.carrier || '').trim(),
+      payment: String(data.payment || '').trim(),
+      note: String(data.note || '').trim().slice(0, 500),
+      items: data.items
+    });
+    return json_({
+      status: 'ok',
+      rows: result.rows,
+      count: result.rows.length,
+      orderId: result.orderId,
+      date: result.date
+    });
   } catch (err) {
     return json_({ status: 'error', message: String(err && err.message || err) });
   }
@@ -198,5 +299,19 @@ function testConnection() {
   var rows = findWritableRows_(sheet, 3);
   Logger.log('分頁：' + sheet.getName());
   Logger.log('接下來三本會寫在第 ' + rows.join('、') + ' 列');
+  Logger.log('下一單的訂單編號：' + nextOrderId_(sheet));
+
+  // 會被覆寫的欄位現在是不是公式，寫之前先讓店主知道
+  var cols = [COL_ORDER_ID, COL_DATE, COL_PAYMENT, COL_NOTE];
+  for (var c = 0; c < cols.length; c++) {
+    var f = sheet.getRange(rows[0], cols[c]).getFormula();
+    Logger.log(columnLetter_(cols[c]) + rows[0] + '：' + (f ? '公式 ' + f : '不是公式'));
+  }
+  try {
+    assertNoArrayFormula_(sheet, cols);
+    Logger.log('沒有 ARRAYFORMULA，可以安全寫入');
+  } catch (err) {
+    Logger.log('⚠️ ' + err.message);
+  }
   Logger.log('（唯讀測試，沒有寫入任何資料）');
 }

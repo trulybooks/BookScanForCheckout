@@ -358,6 +358,19 @@ main {
 /* 輸入框 + 掃描鈕並排。輸入框要能縮，否則窄螢幕會把按鈕擠出畫面 */
 .field-with-btn { display: flex; gap: 8px; align-items: stretch; }
 .field-with-btn .input-text { flex: 1; min-width: 0; }
+/* 下拉與多行輸入沿用 .input-text 的框（rounded-sm 2px），只補各自需要的部分 */
+.input-select {
+	appearance: none;
+	-webkit-appearance: none;
+	background-image: linear-gradient(45deg, transparent 50%, var(--secondary) 50%),
+		linear-gradient(135deg, var(--secondary) 50%, transparent 50%);
+	background-position: calc(100% - 18px) 50%, calc(100% - 13px) 50%;
+	background-size: 5px 5px;
+	background-repeat: no-repeat;
+	padding-right: 36px;
+}
+.input-select:invalid, .input-select option[value=""] { color: var(--accent); }
+.input-textarea { resize: vertical; min-height: 64px; line-height: 1.6; font-family: inherit; }
 
 .btn-scan {
 	flex-shrink: 0;
@@ -451,6 +464,7 @@ main {
 .btn-photo--ghost { border-color: transparent; background: none; color: var(--secondary); }
 .photo-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .photo-note { font-size: 0.78rem; color: var(--secondary); letter-spacing: 0.04em; }
+.photo-note--warn { color: var(--danger); font-weight: 700; }
 .photo-thumb {
 	width: 56px;
 	height: 74px;
@@ -576,7 +590,10 @@ main {
 .credit-hint--warn { color: var(--danger); }
 
 .action-row { display: flex; gap: 10px; }
+/* 送出鍵的文字會變長（「仍要送出並存 3 張封面」），手機上兩顆並排放不下，
+   所以送出鍵佔比較寬、而且允許換行，不讓字被切掉。 */
 .action-row .btn { flex: 1; min-width: 0; white-space: nowrap; }
+.action-row #btn-submit { flex: 1.6; white-space: normal; line-height: 1.3; padding-left: 14px; padding-right: 14px; }
 
 /* ---------- 完成 ---------- */
 .result-body { display: flex; flex-direction: column; gap: 14px; }

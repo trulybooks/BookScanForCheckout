@@ -2,7 +2,7 @@ import { ScannerService, ScanTarget } from './scanner.js';
 import { UIUtils } from './utils.js';
 import { Catalog, CatalogBook, normalizeISBN } from './catalog.js';
 import { calculateTotals, OrderTotals } from './pricing.js';
-import { getWebAppUrl, getSecret, saveSettings, submitOrder, OrderItem, SubmitOutcome } from './sheet.js';
+import { getWebAppUrl, getSecret, saveSettings, submitOrder, OrderItem, OrderInfo, SubmitOutcome, PAYMENT_OPTIONS, PaymentMethod } from './sheet.js';
 import { CoverPhoto, nameCoverFile, saveCoversToDevice } from './coverPhoto.js';
 
 /** 表單上的一列書。查詢前只有店員輸入的內容。 */
@@ -38,11 +38,26 @@ class CheckoutApp {
 	 * saveAllPhotos 結束時會重畫明細，把按鈕狀態重設回來。
 	 */
 	private submitting = false;
+	/**
+	 * 店員已經被提醒過漏拍封面、選擇照樣送出。不用 confirm() 對話框問：對話框停留
+	 * 超過 iOS 的手勢時限（約一秒），接著要叫的分享選單（存封面）就會被拒絕。
+	 * 改成第一次按送出時只提醒，再按一次才送——第二次是新的點擊，分享選單照常能叫。
+	 */
+	private missingPhotosAcknowledged = false;
 
 	constructor() {
 		this.bindEvents();
+		this.fillPaymentOptions();
 		this.addRow();
 		this.loadCatalog();
+	}
+
+	private fillPaymentOptions(): void {
+		const select = document.getElementById('input-payment') as HTMLSelectElement | null;
+		if (!select) return;
+		for (const option of PAYMENT_OPTIONS) {
+			select.add(new Option(option, option));
+		}
 	}
 
 	// ======================== 書目 ========================
@@ -158,6 +173,8 @@ class CheckoutApp {
 		}
 
 		this.rows = filled;
+		this.missingPhotosAcknowledged = false;
+		document.getElementById('review-error')?.classList.add('hidden');
 		this.renderReview();
 		this.switchView('view-review');
 	}
@@ -185,7 +202,6 @@ class CheckoutApp {
 						<div class="review-body">
 							<p class="review-typed">${UIUtils.escapeHtml(typed)}</p>
 							<p class="review-note review-note--warn">書目裡查不到，這一筆不會計入金額，也不會寫進試算表。</p>
-							${this.photoBlock(row)}
 						</div>
 					</div>`;
 			}
@@ -263,9 +279,11 @@ class CheckoutApp {
 			submit.disabled = pending > 0 || books.length === 0;
 			// 有拍封面時，按鈕直接寫明「送出並存」：按一次就會先存照片再送單
 			const photosToSave = this.unsavedPhotoCount();
+			const save = photosToSave > 0 ? `並存 ${photosToSave} 張封面` : '';
+			const warned = this.missingPhotosAcknowledged && this.rowsMissingPhoto().length > 0;
 			submit.textContent = pending > 0
 				? `還有 ${pending} 本未選擇`
-				: photosToSave > 0 ? `送出並存 ${photosToSave} 張封面` : '確認送出';
+				: warned ? `仍要送出${save}` : save ? `送出${save}` : '確認送出';
 		}
 	}
 
@@ -276,32 +294,51 @@ class CheckoutApp {
 		if (books.length === 0) return;
 
 		const name = (document.getElementById('input-name') as HTMLInputElement)?.value.trim() ?? '';
+		const payment = (document.getElementById('input-payment') as HTMLSelectElement)?.value ?? '';
 		const reviewError = document.getElementById('review-error');
-		if (!name) {
+		const missing = [!name && '購買人姓名', !payment && '付款方式'].filter(Boolean);
+		if (missing.length > 0) {
 			if (reviewError) {
-				reviewError.textContent = '請填寫購買人姓名。';
+				reviewError.textContent = `請填寫${missing.join('、')}。`;
 				reviewError.classList.remove('hidden');
 			}
-			document.getElementById('input-name')?.focus();
+			document.getElementById(!name ? 'input-name' : 'input-payment')?.focus();
 			return;
 		}
 		reviewError?.classList.add('hidden');
 
+		const noPhoto = this.rowsMissingPhoto();
+		if (noPhoto.length > 0 && !this.missingPhotosAcknowledged) {
+			this.missingPhotosAcknowledged = true;
+			if (reviewError) {
+				reviewError.textContent = `第 ${noPhoto.join('、')} 本還沒拍封面。要補拍就按那本書的「拍封面」；不拍的話，再按一次送出。`;
+				reviewError.classList.remove('hidden');
+			}
+			this.renderTotals();
+			return;
+		}
+
+		const order: OrderInfo = {
+			name,
+			carrier: (document.getElementById('input-carrier') as HTMLInputElement)?.value.trim() ?? '',
+			payment: payment as PaymentMethod,
+			note: (document.getElementById('input-note') as HTMLTextAreaElement)?.value.trim() ?? ''
+		};
+
 		if (this.submitting) return;
 		this.submitting = true;
 		try {
-			await this.submitOrderFlow(books, name);
+			await this.submitOrderFlow(books, order);
 		} finally {
 			this.submitting = false;
 		}
 	}
 
-	private async submitOrderFlow(books: CatalogBook[], name: string): Promise<void> {
+	private async submitOrderFlow(books: CatalogBook[], order: OrderInfo): Promise<void> {
 		// 先把這一單的封面一次存進相簿，再送出。順序不能反：分享選單只能在點擊後馬上叫，
 		// 等完寫入試算表的網路請求，iOS 就不讓叫了。取消或失敗都照樣送單，完成頁可以補存。
 		await this.saveAllPhotos();
 
-		const carrier = (document.getElementById('input-carrier') as HTMLInputElement)?.value.trim() ?? '';
 		const totals = calculateTotals(books);
 		const items: OrderItem[] = books.map(b => ({ isbn: b.isbn, title: b.title, price: b.price }));
 
@@ -314,10 +351,10 @@ class CheckoutApp {
 		const url = getWebAppUrl();
 		const secret = getSecret();
 		const outcome: SubmitOutcome = url
-			? await submitOrder(url, secret, name, carrier, items)
+			? await submitOrder(url, secret, order, items)
 			: { status: 'error', message: '尚未設定 Apps Script 網址，這一單沒有寫進試算表。' };
 
-		this.renderResult(name, carrier, books, totals, outcome);
+		this.renderResult(order, books, totals, outcome);
 		this.switchView('view-result');
 
 		if (submit) {
@@ -327,8 +364,7 @@ class CheckoutApp {
 	}
 
 	private renderResult(
-		name: string,
-		carrier: string,
+		order: OrderInfo,
 		books: CatalogBook[],
 		totals: OrderTotals,
 		outcome: SubmitOutcome
@@ -349,8 +385,13 @@ class CheckoutApp {
 		body.innerHTML = `
 			${banner}
 			<div class="result-meta">
-				<div><span>購買人</span><b>${UIUtils.escapeHtml(name)}</b></div>
-				${carrier ? `<div><span>發票載具</span><b>${UIUtils.escapeHtml(carrier)}</b></div>` : ''}
+				${outcome.status === 'ok' ? `
+					<div><span>訂單編號</span><b id="result-order-id">${UIUtils.escapeHtml(outcome.orderId)}</b></div>
+					<div><span>購買日期</span><b>${UIUtils.escapeHtml(outcome.date)}</b></div>` : ''}
+				<div><span>購買人</span><b>${UIUtils.escapeHtml(order.name)}</b></div>
+				${order.carrier ? `<div><span>發票載具</span><b>${UIUtils.escapeHtml(order.carrier)}</b></div>` : ''}
+				<div><span>付款方式</span><b>${UIUtils.escapeHtml(order.payment)}</b></div>
+				${order.note ? `<div><span>備註</span><b>${UIUtils.escapeHtml(order.note)}</b></div>` : ''}
 			</div>
 			<ul class="result-books">
 				${books.map(b => `
@@ -372,12 +413,15 @@ class CheckoutApp {
 		const unsaved = this.unsavedPhotoCount();
 		if (unsaved > 0 && !confirm(`有 ${unsaved} 張封面還沒存到相簿，開始下一單就會清掉。確定嗎？`)) return;
 		this.clearPhotos();
+		this.missingPhotosAcknowledged = false;
 
 		this.rows = [];
 		this.nextRowId = 1;
 		this.addRow();
 		(document.getElementById('input-name') as HTMLInputElement).value = '';
 		(document.getElementById('input-carrier') as HTMLInputElement).value = '';
+		(document.getElementById('input-payment') as HTMLSelectElement).value = '';
+		(document.getElementById('input-note') as HTMLTextAreaElement).value = '';
 		this.clearFormError();
 		document.getElementById('review-error')?.classList.add('hidden');
 		this.switchView('view-form');
@@ -388,7 +432,11 @@ class CheckoutApp {
 	private photoBlock(row: BookRow): string {
 		const photo = this.photos.get(row.id);
 		if (!photo) {
-			return `<button class="btn-photo" data-photo="${row.id}">📸 拍封面</button>`;
+			return `
+				<div class="photo-row">
+					<button class="btn-photo" data-photo="${row.id}">📸 拍封面</button>
+					<span class="photo-note photo-note--warn">⚠️ 還沒拍封面</span>
+				</div>`;
 		}
 		return `
 			<div class="photo-row">
@@ -418,6 +466,10 @@ class CheckoutApp {
 		const old = this.photos.get(rowId);
 		if (old) URL.revokeObjectURL(old.url);
 		this.photos.set(rowId, { file: named, url: URL.createObjectURL(named), saved: false });
+		if (this.rowsMissingPhoto().length === 0) {
+			this.missingPhotosAcknowledged = false;
+			document.getElementById('review-error')?.classList.add('hidden');
+		}
 		this.renderReview();
 	}
 
@@ -458,6 +510,14 @@ class CheckoutApp {
 			</div>
 			<button id="btn-save-all-photos" class="btn btn-secondary btn-large">存全部 ${unsaved.length} 張封面</button>`;
 		document.getElementById('btn-save-all-photos')?.addEventListener('click', () => this.saveAllPhotos());
+	}
+
+	/** 會賣出（查得到書）卻還沒拍封面的書，回傳畫面上的序號（從 1 起算）。 */
+	private rowsMissingPhoto(): number[] {
+		return this.rows
+			.map((r, i) => ({ r, no: i + 1 }))
+			.filter(({ r }) => r.candidates && r.candidates.length > 0 && !this.photos.has(r.id))
+			.map(({ no }) => no);
 	}
 
 	private unsavedPhotoCount(): number {
