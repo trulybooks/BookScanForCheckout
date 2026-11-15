@@ -14,6 +14,11 @@ export interface OrderItem {
 	/** 單價（一本的定價）。金額由試算表的公式 數量 × 單價 自己算。 */
 	price: number;
 	quantity: number;
+	/**
+	 * 這一本自己的備註，取代整單的備註寫在它那一列。只有跟整單不同時才帶，
+	 * 例如手動輸入的書要多標「進貨無此書」——標在整單會把查得到的書也標上。
+	 */
+	note?: string;
 }
 
 /**
@@ -21,7 +26,9 @@ export interface OrderItem {
  * 這裡跟著改。部署的還是舊版時，新欄位會被默默忽略（例如數量都記成 1 本），
  * 所以版本不夠就當成錯誤回報，不假裝成功。
  */
-const REQUIRED_API_VERSION = 2;
+const BASE_API_VERSION = 2;
+/** item.note 是版本 3 才有的。只有用到時才要求版本 3，其他訂單在版本 2 照樣能送。 */
+const ITEM_NOTE_API_VERSION = 3;
 
 /** 付款方式。字串要跟試算表 M 欄的下拉選項一字不差（「台灣 Pay」有空格）。 */
 export const PAYMENT_OPTIONS = ['現金', '轉帳', '刷卡', '台灣 Pay', '文化幣'] as const;
@@ -90,6 +97,7 @@ export async function submitOrder(
 	items: OrderItem[]
 ): Promise<SubmitOutcome> {
 	const body = JSON.stringify({ secret, ...order, items });
+	const required = items.some(i => i.note !== undefined) ? ITEM_NOTE_API_VERSION : BASE_API_VERSION;
 
 	try {
 		const res = await fetch(webAppUrl, {
@@ -113,7 +121,7 @@ export async function submitOrder(
 		}
 
 		if (parsed.status === 'ok' && Array.isArray(parsed.rows)) {
-			if (!parsed.orderId || (parsed.apiVersion ?? 1) < REQUIRED_API_VERSION) {
+			if (!parsed.orderId || (parsed.apiVersion ?? 1) < required) {
 				return {
 					status: 'error',
 					message: `書已寫入第 ${parsed.rows.join('、')} 列，但 Apps Script 不是最新版，訂單編號、日期、付款方式、備註或數量可能沒有寫對。請到試算表手動補上，並重新部署 checkout_append.gs。不要再送一次，會重複記帳。`

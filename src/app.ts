@@ -67,8 +67,13 @@ const money = (n: number) => `NT$ ${n.toLocaleString('en-US')}`;
  * **最後面**——店員自己寫的備註在前、用「；」隔開，店長點進格子直接在結尾打編號就好。
  */
 const creditNote = (credit: number) => (credit > 0 ? `贈${credit}元購書金編號` : '');
-const composeNote = (credit: number, typed: string) =>
-	[typed.trim(), creditNote(credit)].filter(Boolean).join('；');
+
+/** 手動輸入（書目裡查不到）的書，在它那一列的備註標記，方便之後補入庫。 */
+const NOT_IN_STOCK_NOTE = '進貨無此書';
+
+/** 一列的備註：店員寫的 →（這本書自己的標記）→ 購書金。購書金永遠最後，店長接著補編號。 */
+const composeNote = (credit: number, typed: string, rowMark = '') =>
+	[typed.trim(), rowMark, creditNote(credit)].filter(Boolean).join('；');
 
 class CheckoutApp {
 	private scanner = new ScannerService();
@@ -88,6 +93,8 @@ class CheckoutApp {
 	 * saveAllPhotos 結束時會重畫明細，把按鈕狀態重設回來。
 	 */
 	private submitting = false;
+	/** 送出時店員打的備註原文，用來幫手動的書組它那一列的備註 */
+	private pendingTypedNote = '';
 	/**
 	 * 店員已經被提醒過漏拍封面、選擇照樣送出。不用 confirm() 對話框問：對話框停留
 	 * 超過 iOS 的手勢時限（約一秒），接著要叫的分享選單（存封面）就會被拒絕。
@@ -236,10 +243,10 @@ class CheckoutApp {
 	// ======================== 確認 ========================
 
 	/** 目前已選定的書，用來算錢。 */
-	private selectedLines(): OrderLine[] {
+	private selectedLines(): (OrderLine & { manual: boolean })[] {
 		return this.rows
-			.map(r => ({ book: this.rowBook(r), quantity: r.quantity }))
-			.filter((l): l is OrderLine => l.book !== null);
+			.map(r => ({ book: this.rowBook(r), quantity: r.quantity, manual: !!r.manual }))
+			.filter((l): l is OrderLine & { manual: boolean } => l.book !== null);
 	}
 
 	/** 這一列要賣的書：查到的選中那本，或店長手動填完整的資料。 */
@@ -418,8 +425,11 @@ class CheckoutApp {
 
 		const hint = document.getElementById('note-auto');
 		if (hint) {
-			hint.textContent = t.credit > 0 ? `送出時會自動在備註最後加上「${creditNote(t.credit)}」，編號請店長在試算表補上` : '';
-			hint.classList.toggle('hidden', t.credit === 0);
+			const parts: string[] = [];
+			if (this.rows.some(r => r.manual)) parts.push(`手動輸入的書，那一列備註會加上「${NOT_IN_STOCK_NOTE}」`);
+			if (t.credit > 0) parts.push(`備註最後會加上「${creditNote(t.credit)}」，編號請店長在試算表補上`);
+			hint.textContent = parts.length ? `送出時自動處理：${parts.join('；')}` : '';
+			hint.classList.toggle('hidden', parts.length === 0);
 		}
 
 		if (submit) {
@@ -475,6 +485,7 @@ class CheckoutApp {
 				(document.getElementById('input-note') as HTMLTextAreaElement)?.value ?? ''
 			)
 		};
+		this.pendingTypedNote = (document.getElementById('input-note') as HTMLTextAreaElement)?.value ?? '';
 
 		if (this.submitting) return;
 		this.submitting = true;
@@ -485,17 +496,20 @@ class CheckoutApp {
 		}
 	}
 
-	private async submitOrderFlow(lines: OrderLine[], order: OrderInfo): Promise<void> {
+	private async submitOrderFlow(lines: (OrderLine & { manual: boolean })[], order: OrderInfo): Promise<void> {
 		// 先把這一單的封面一次存進相簿，再送出。順序不能反：分享選單只能在點擊後馬上叫，
 		// 等完寫入試算表的網路請求，iOS 就不讓叫了。取消或失敗都照樣送單，完成頁可以補存。
 		await this.saveAllPhotos();
 
 		const totals = calculateTotals(lines);
-		const items: OrderItem[] = lines.map(({ book, quantity }) => ({
+		const credit = totals.credit;
+		const items: OrderItem[] = lines.map(({ book, quantity, manual }) => ({
 			isbn: book.isbn,
 			title: book.title,
 			price: book.price,
-			quantity
+			quantity,
+			// 手動輸入的書，它那一列的備註多標「進貨無此書」；其他書沿用整單的備註
+			...(manual ? { note: composeNote(credit, this.pendingTypedNote, NOT_IN_STOCK_NOTE) } : {})
 		}));
 
 		const submit = document.getElementById('btn-submit') as HTMLButtonElement | null;

@@ -64,7 +64,8 @@ var MAX_QUANTITY = 99;
 // 部署的是舊版就報錯，而不是讓新欄位被默默忽略。改了 payload 就把這個數字加一。
 //   1：姓名、載具、ISBN、商品、單價
 //   2：加上訂單編號、購買日期、付款方式、備註、數量
-var API_VERSION = 2;
+//   3：每一本書可以帶自己的備註（item.note），例如手動輸入的書要標「進貨無此書」
+var API_VERSION = 3;
 
 var TIMEZONE = 'Asia/Taipei';
 
@@ -240,9 +241,11 @@ function appendOrder_(order) {
 
       sheet.getRange(row, COL_PAYMENT).setValue(order.payment);
 
-      // 備註是店員自由輸入的文字，設成純文字，= 開頭也不會被當成公式執行
-      if (order.note) {
-        sheet.getRange(row, COL_NOTE).setNumberFormat('@').setValue(order.note);
+      // 備註通常整單相同；某本書帶了自己的備註（例如「進貨無此書」）就用它的，
+      // 前端已經把整單的部分組進去了。設成純文字，= 開頭也不會被當成公式執行。
+      var note = item.note === undefined ? order.note : String(item.note).trim().slice(0, 500);
+      if (note) {
+        sheet.getRange(row, COL_NOTE).setNumberFormat('@').setValue(note);
       }
     }
 

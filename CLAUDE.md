@@ -105,6 +105,10 @@ payload means changing both.
   and always placed **last**, after the operator's own note and a `；`, so the number can be
   typed straight at the end of the cell. The note field is capped at 400 characters so the
   `.gs`'s 500-character cut can never chop the credit text off.
+- **A manually entered book's row also gets `進貨無此書`** so the shop can find what still needs
+  adding to the catalogue. That mark must not land on the catalogue books in the same order,
+  so it goes in `item.note` (API v3), which replaces the order note on that row only:
+  operator's note → 進貨無此書 → credit text, credit still last.
 
 - **The carrier is written as text.** It starts with `/`, which Google otherwise takes for the
   start of a formula and renders as `#ERROR!`.
@@ -115,10 +119,11 @@ payload means changing both.
   with 數量 2, not two rows. Both totals and the store-credit threshold count every copy.
   The `.gs` validates every quantity before writing anything, so a bad one rejects the whole
   order rather than half-writing it.
-- **API version handshake.** The `.gs` returns `apiVersion`; `sheet.ts` requires
-  `REQUIRED_API_VERSION`. A stale deployment would otherwise silently ignore new fields — every
-  book recorded as quantity 1, say — and the till would show success. Bump both whenever the
-  payload changes. A version mismatch is reported as an error that says the books *were* written
+- **API version handshake.** The `.gs` returns `apiVersion`; `sheet.ts` requires a minimum.
+  A stale deployment would otherwise silently ignore new fields — every book recorded as
+  quantity 1, say — and the till would show success. Bump both whenever the payload changes.
+  The minimum depends on what the order uses: version 2 normally, version 3 only when an item
+  carries its own `note`, so orders without manual books keep working on a version-2 deploy. A version mismatch is reported as an error that says the books *were* written
   and must not be resubmitted.
 - ISBN is written with a text number format. Without it Google turns a 13-digit ISBN into
   `9.78986E+12`.
