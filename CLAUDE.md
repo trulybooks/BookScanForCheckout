@@ -19,11 +19,15 @@ esbuild, deployed as static files to GitHub Pages on every push to `main`.
 ### Books the catalogue doesn't have
 
 They are **not dropped**. Stock sometimes reaches the shelf before it reaches the catalogue
-sheet, and the sale still has to be recorded. A row with no match gets `BookRow.manual`: title
-and price required (whole NT$, 1–100000), ISBN optional and pre-filled from what was typed,
-new/used defaulting to new — the same rule as before for anything not marked 舊書 — and it
-counts toward the store-credit threshold if marked used. Until title and price are valid the
-row isn't counted and submit stays disabled (還有 N 本資料未填完). Typing updates totals without
+sheet, and the sale still has to be recorded. A row with no match gets `BookRow.manual`: price
+required (whole NT$, 1–100000) and **title or ISBN — either one is enough**. Whichever was typed
+or scanned on the first screen is pre-filled and the other is left for the manager to complete
+in the sheet later; both fields are marked only while both are empty. A row with only an ISBN
+has an empty 商品 cell, which is fine: the `.gs` treats a row as taken if *either* ISBN or 商品
+is filled, so the next order can't overwrite it. The Done screen shows `ISBN …` in place of a
+missing title. New/used defaults to new — the same rule as before for anything not marked
+舊書 — and it counts toward the store-credit threshold if marked used. Until the price and
+one of title/ISBN are valid the row isn't counted and submit stays disabled (還有 N 本資料未填完). Typing updates totals without
 re-rendering, so the cursor stays put; `:invalid` styling shows which field is missing.
 Manual rows are written to the sheet exactly like catalogue books, and show as `新書・手動` /
 `舊書・手動` on the Done screen. Going back and looking up again keeps what was filled in.

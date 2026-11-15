@@ -33,14 +33,19 @@ interface ManualEntry {
 
 const MAX_MANUAL_PRICE = 100000;
 
-/** 手動資料填完整了才回傳一本書；書名與正整數定價是必填。 */
+/**
+ * 手動資料填完整了才回傳一本書。書名與 ISBN 至少要有一個（店長確認：前面掃的是 ISBN
+ * 就只帶 ISBN、打的是書名就只帶書名，另一個空著沒關係）；定價是必填的正整數。
+ */
 function manualBook(m: ManualEntry | undefined): CatalogBook | null {
 	if (!m) return null;
 	const title = m.title.trim();
+	const isbn = normalizeISBN(m.isbn);
 	const price = Number(m.price);
-	if (!title || !Number.isInteger(price) || price < 1 || price > MAX_MANUAL_PRICE) return null;
+	if (!title && !isbn) return null;
+	if (!Number.isInteger(price) || price < 1 || price > MAX_MANUAL_PRICE) return null;
 	return {
-		isbn: normalizeISBN(m.isbn),
+		isbn,
 		title,
 		author: '',
 		price,
@@ -264,6 +269,7 @@ class CheckoutApp {
 
 			if (row.manual) {
 				const m = row.manual;
+				const needsId = !m.title.trim() && !m.isbn.trim();
 				return `
 					<div class="review-item review-item--manual">
 						<span class="review-no">${i + 1}</span>
@@ -271,15 +277,18 @@ class CheckoutApp {
 							<p class="review-typed">${UIUtils.escapeHtml(typed)}</p>
 							<p class="review-note review-note--warn">書目裡查不到（可能還沒入庫），請手動填寫</p>
 							<div class="manual-grid">
+								<p class="field-hint manual-wide">書名、ISBN 至少填一個</p>
 								<label class="field manual-wide">
-									<span class="field-label">書名 ＊</span>
+									<span class="field-label">書名</span>
 									<input type="text" class="input-text" data-manual="title" data-row="${row.id}"
-										value="${UIUtils.escapeAttr(m.title)}" required autocomplete="off">
+										value="${UIUtils.escapeAttr(m.title)}" ${needsId ? 'required' : ''} autocomplete="off"
+										placeholder="${m.isbn.trim() ? '可留空，店長之後補' : ''}">
 								</label>
 								<label class="field manual-wide">
 									<span class="field-label">ISBN</span>
 									<input type="text" class="input-text" data-manual="isbn" data-row="${row.id}"
-										value="${UIUtils.escapeAttr(m.isbn)}" inputmode="numeric" autocomplete="off" placeholder="可留空">
+										value="${UIUtils.escapeAttr(m.isbn)}" ${needsId ? 'required' : ''} inputmode="numeric" autocomplete="off"
+										placeholder="${m.title.trim() ? '可留空，店長之後補' : ''}">
 								</label>
 								<label class="field">
 									<span class="field-label">定價 ＊</span>
@@ -348,6 +357,12 @@ class CheckoutApp {
 					if (input.checked) m.used = input.value === 'used';
 				} else if (field === 'title' || field === 'isbn' || field === 'price') {
 					m[field] = input.value;
+				}
+				if (field === 'title' || field === 'isbn') {
+					// 兩個都空才標紅框；填了其中一個，兩個的紅框一起消失
+					const needsId = !m.title.trim() && !m.isbn.trim();
+					list.querySelectorAll<HTMLInputElement>(`input[data-row="${row.id}"][data-manual="title"], input[data-row="${row.id}"][data-manual="isbn"]`)
+						.forEach(el => { el.required = needsId; });
 				}
 				this.renderTotals();
 			};
@@ -566,7 +581,7 @@ class CheckoutApp {
 			<ul class="result-books">
 				${lines.map(({ book: b, quantity }) => `
 					<li>
-						<span class="result-book-title">${UIUtils.escapeHtml(b.title)}${quantity > 1 ? ` <b class="result-qty">×${quantity}</b>` : ''}</span>
+						<span class="result-book-title">${UIUtils.escapeHtml(b.title || `ISBN ${b.isbn}`)}${quantity > 1 ? ` <b class="result-qty">×${quantity}</b>` : ''}</span>
 						<span class="tag${b.isUsed ? ' tag--used' : ''}">${UIUtils.escapeHtml(b.condition || '未註記')}</span>
 						<span class="result-book-price">${money(b.price * quantity)}</span>
 					</li>`).join('')}
