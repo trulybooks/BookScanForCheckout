@@ -23,14 +23,20 @@ processed. Two browser limits shape it:
 - A web page can't launch the iOS Camera app. `<input type=file accept=image/* capture=environment>`
   opens the system camera directly, which is as close as it gets. One input is shared by all rows.
 - A photo taken that way is **not** in the Photos library — it's just a file handed to the page,
-  and a page can't write to Photos silently. Saving goes through `navigator.share` (the share
-  sheet's 儲存影像), which needs a user tap, so it's a separate 存到相簿 button; calling it from
-  the input's `change` event fails on iOS because the gesture has expired. Browsers that can't
-  share files fall back to a download.
-
-Photos live in memory keyed by row id. The Done screen lists unsaved ones to save in place —
-not by sending the operator back to Confirm, whose 確認送出 would write the order twice — and
-開始下一單 asks before discarding unsaved photos.
+  and a page can't write to Photos silently. Saving goes through `navigator.share` with **all
+  of the order's photos at once** (the share sheet offers 儲存 N 張影像). The tap on 儲存影像 is
+  iOS's own confirmation and can't be skipped.
+- `navigator.share` only works right after a user tap. So the submit button — labelled
+  送出並存 N 張封面 when there are photos — opens the share sheet **first, before any await**,
+  and only then writes the order. Writing first would let the network request expire the
+  gesture and iOS would refuse the share. Calling it from the camera input's `change` event
+  fails for the same reason.
+- `submitting` guards the gap while the share sheet is open: the button isn't disabled yet,
+  and a double tap would otherwise write the order twice.
+- Cancelling the share sheet still submits the order. The Done screen then offers one
+  存全部 N 張封面 button — never a way back to Confirm, whose submit would write the order again
+  — and 開始下一單 asks before discarding unsaved photos.
+- Browsers that can't share files fall back to downloading each photo.
 
 ## Where the data lives
 

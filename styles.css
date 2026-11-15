@@ -448,9 +448,9 @@ main {
 	-webkit-tap-highlight-color: transparent;
 }
 .btn-photo:hover, .btn-photo:active { background: var(--bg-tint); border-color: var(--primary); }
-.btn-photo--done { background: var(--bg-tint); color: var(--secondary); }
 .btn-photo--ghost { border-color: transparent; background: none; color: var(--secondary); }
 .photo-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.photo-note { font-size: 0.78rem; color: var(--secondary); letter-spacing: 0.04em; }
 .photo-thumb {
 	width: 56px;
 	height: 74px;

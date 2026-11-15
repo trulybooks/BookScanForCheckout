@@ -3,7 +3,7 @@ import { UIUtils } from './utils.js';
 import { Catalog, CatalogBook, normalizeISBN } from './catalog.js';
 import { calculateTotals, OrderTotals } from './pricing.js';
 import { getWebAppUrl, getSecret, saveSettings, submitOrder, OrderItem, SubmitOutcome } from './sheet.js';
-import { CoverPhoto, nameCoverFile, saveCoverToDevice } from './coverPhoto.js';
+import { CoverPhoto, nameCoverFile, saveCoversToDevice } from './coverPhoto.js';
 
 /** 表單上的一列書。查詢前只有店員輸入的內容。 */
 interface BookRow {
@@ -32,6 +32,12 @@ class CheckoutApp {
 	private photos = new Map<number, CoverPhoto>();
 	/** 正在幫哪一本拍（共用一個 file input，所以要記住是誰按的） */
 	private photoFor: number | null = null;
+	/**
+	 * 送出中。按下確認送出後要先等分享選單（存封面）才開始寫入，那段時間送出鍵還沒
+	 * 停用，連點會變成兩次寫入試算表——同一單記兩筆。用旗標擋，不靠按鈕狀態：
+	 * saveAllPhotos 結束時會重畫明細，把按鈕狀態重設回來。
+	 */
+	private submitting = false;
 
 	constructor() {
 		this.bindEvents();
@@ -217,10 +223,6 @@ class CheckoutApp {
 		list.querySelectorAll<HTMLButtonElement>('[data-photo]').forEach(btn => {
 			btn.addEventListener('click', () => this.takePhoto(Number(btn.dataset.photo)));
 		});
-		list.querySelectorAll<HTMLButtonElement>('[data-save-photo]').forEach(btn => {
-			btn.addEventListener('click', () => this.savePhoto(Number(btn.dataset.savePhoto)));
-		});
-
 		list.querySelectorAll<HTMLInputElement>('input[data-pick]').forEach(input => {
 			input.addEventListener('change', () => {
 				const row = this.rows.find(r => r.id === Number(input.dataset.pick));
@@ -259,7 +261,11 @@ class CheckoutApp {
 
 		if (submit) {
 			submit.disabled = pending > 0 || books.length === 0;
-			submit.textContent = pending > 0 ? `還有 ${pending} 本未選擇` : '確認送出';
+			// 有拍封面時，按鈕直接寫明「送出並存」：按一次就會先存照片再送單
+			const photosToSave = this.unsavedPhotoCount();
+			submit.textContent = pending > 0
+				? `還有 ${pending} 本未選擇`
+				: photosToSave > 0 ? `送出並存 ${photosToSave} 張封面` : '確認送出';
 		}
 	}
 
@@ -280,6 +286,20 @@ class CheckoutApp {
 			return;
 		}
 		reviewError?.classList.add('hidden');
+
+		if (this.submitting) return;
+		this.submitting = true;
+		try {
+			await this.submitOrderFlow(books, name);
+		} finally {
+			this.submitting = false;
+		}
+	}
+
+	private async submitOrderFlow(books: CatalogBook[], name: string): Promise<void> {
+		// 先把這一單的封面一次存進相簿，再送出。順序不能反：分享選單只能在點擊後馬上叫，
+		// 等完寫入試算表的網路請求，iOS 就不讓叫了。取消或失敗都照樣送單，完成頁可以補存。
+		await this.saveAllPhotos();
 
 		const carrier = (document.getElementById('input-carrier') as HTMLInputElement)?.value.trim() ?? '';
 		const totals = calculateTotals(books);
@@ -373,9 +393,7 @@ class CheckoutApp {
 		return `
 			<div class="photo-row">
 				<img class="photo-thumb" src="${photo.url}" alt="第 ${row.id} 本的封面">
-				<button class="btn-photo${photo.saved ? ' btn-photo--done' : ''}" data-save-photo="${row.id}">
-					${photo.saved ? '✓ 已存' : '存到相簿'}
-				</button>
+				<span class="photo-note">${photo.saved ? '✓ 已存到相簿' : '送出時一起存'}</span>
 				<button class="btn-photo btn-photo--ghost" data-photo="${row.id}">重拍</button>
 			</div>`;
 	}
@@ -403,19 +421,21 @@ class CheckoutApp {
 		this.renderReview();
 	}
 
-	private async savePhoto(rowId: number): Promise<void> {
-		const photo = this.photos.get(rowId);
-		if (!photo) return;
+	/** 把還沒存的封面一次交給系統存。必須由點擊直接呼叫。 */
+	private async saveAllPhotos(): Promise<void> {
+		const pending = [...this.photos.values()].filter(p => !p.saved);
+		if (pending.length === 0) return;
 		try {
-			const outcome = await saveCoverToDevice(photo.file);
+			const outcome = await saveCoversToDevice(pending.map(p => p.file));
 			if (outcome === 'cancelled') return;
-			photo.saved = true;
-			this.renderReview();
-			this.renderResultPhotos();
-			if (outcome === 'downloaded') UIUtils.showToast('已下載封面照片', 2000);
+			pending.forEach(p => { p.saved = true; });
+			if (outcome === 'downloaded') UIUtils.showToast(`已下載 ${pending.length} 張封面`, 2000);
 		} catch (error) {
 			console.error(error);
-			UIUtils.showToast('存照片失敗，請再按一次', 3000);
+			UIUtils.showToast('封面沒有存成功，完成頁可以再存一次', 3000);
+		} finally {
+			this.renderReview();
+			this.renderResultPhotos();
 		}
 	}
 
@@ -433,12 +453,11 @@ class CheckoutApp {
 		}
 		box.innerHTML = `
 			<div class="banner banner--warn">有 ${unsaved.length} 張封面還沒存到相簿，開始下一單就會清掉。</div>
-			${unsaved.map(r => this.photoBlock(r)).join('')}`;
-		box.querySelectorAll<HTMLButtonElement>('[data-save-photo]').forEach(btn => {
-			btn.addEventListener('click', () => this.savePhoto(Number(btn.dataset.savePhoto)));
-		});
-		// 完成畫面不提供重拍：這一單已經送出了
-		box.querySelectorAll('[data-photo]').forEach(btn => btn.remove());
+			<div class="photo-row">
+				${unsaved.map(r => `<img class="photo-thumb" src="${this.photos.get(r.id)!.url}" alt="封面">`).join('')}
+			</div>
+			<button id="btn-save-all-photos" class="btn btn-secondary btn-large">存全部 ${unsaved.length} 張封面</button>`;
+		document.getElementById('btn-save-all-photos')?.addEventListener('click', () => this.saveAllPhotos());
 	}
 
 	private unsavedPhotoCount(): number {

@@ -5,9 +5,9 @@
  * - 網頁開不了 iOS 內建的「相機」App。`<input capture>` 會直接跳出系統的拍照畫面，
  *   是最接近的作法。
  * - 用 input 拍的照片**不會**自動進相簿（只是一個交給網頁的檔案），網頁也沒辦法
- *   默默寫進相簿。所以拍完要再按一下「存到相簿」，透過分享選單的「儲存影像」存。
- *   navigator.share 必須由使用者的點擊觸發，不能在拍完的 change 事件裡自動叫——
- *   那時候已經沒有使用者手勢，iOS 會拒絕。
+ *   默默寫進相簿。所以是在按「確認送出」時，把整單的照片一次交給分享選單，
+ *   店員選「儲存 N 張影像」。navigator.share 必須由使用者的點擊觸發，不能在拍完的
+ *   change 事件裡自動叫——那時候已經沒有使用者手勢，iOS 會拒絕。
  * - 不支援分享檔案的瀏覽器（例如電腦）退回成下載。
  */
 
@@ -30,11 +30,17 @@ export function nameCoverFile(raw: File, isbn: string): File {
 
 export type SaveOutcome = 'saved' | 'cancelled' | 'downloaded';
 
-/** 一定要在使用者點擊的 handler 裡呼叫。 */
-export async function saveCoverToDevice(file: File): Promise<SaveOutcome> {
-	if (navigator.canShare?.({ files: [file] })) {
+/**
+ * 一次把多張封面交給系統存（分享選單會顯示「儲存 N 張影像」）。
+ * 一定要在使用者點擊的 handler 裡、任何 await 之前呼叫：iOS 只在點擊後的短暫時間內
+ * 允許叫出分享選單，先去等網路請求就會過期而被拒絕。
+ */
+export async function saveCoversToDevice(files: File[]): Promise<SaveOutcome> {
+	if (files.length === 0) return 'saved';
+
+	if (navigator.canShare?.({ files })) {
 		try {
-			await navigator.share({ files: [file] });
+			await navigator.share({ files });
 			return 'saved';
 		} catch (error) {
 			if ((error as DOMException).name === 'AbortError') return 'cancelled';
@@ -42,12 +48,15 @@ export async function saveCoverToDevice(file: File): Promise<SaveOutcome> {
 		}
 	}
 
-	const a = document.createElement('a');
-	a.href = URL.createObjectURL(file);
-	a.download = file.name;
-	document.body.appendChild(a);
-	a.click();
-	a.remove();
-	setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
+	// 不能分享檔案的瀏覽器（例如電腦）：逐張下載
+	for (const file of files) {
+		const a = document.createElement('a');
+		a.href = URL.createObjectURL(file);
+		a.download = file.name;
+		document.body.appendChild(a);
+		a.click();
+		a.remove();
+		setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
+	}
 	return 'downloaded';
 }
