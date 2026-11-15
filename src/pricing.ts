@@ -15,6 +15,12 @@ const CREDIT_TIERS: ReadonlyArray<{ threshold: number; credit: number }> = [
 	{ threshold: 300, credit: 100 }
 ];
 
+/** 一單裡的一種書：同一本買幾本。 */
+export interface OrderLine {
+	book: CatalogBook;
+	quantity: number;
+}
+
 export interface OrderTotals {
 	/** 應付總額：全部書的定價加總，購物金不在這裡扣 */
 	total: number;
@@ -28,15 +34,17 @@ export interface OrderTotals {
 	toNextTier: { needed: number; credit: number } | null;
 }
 
-export function calculateTotals(books: CatalogBook[]): OrderTotals {
+export function calculateTotals(lines: OrderLine[]): OrderTotals {
 	let usedSubtotal = 0;
 	let newSubtotal = 0;
 
-	for (const book of books) {
+	// 同一本舊書買兩本，兩本都算進舊書小計，購物金門檻也跟著算
+	for (const { book, quantity } of lines) {
+		const amount = book.price * quantity;
 		if (book.isUsed) {
-			usedSubtotal += book.price;
+			usedSubtotal += amount;
 		} else {
-			newSubtotal += book.price;
+			newSubtotal += amount;
 		}
 	}
 

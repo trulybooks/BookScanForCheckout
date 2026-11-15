@@ -462,6 +462,38 @@ main {
 }
 .btn-photo:hover, .btn-photo:active { background: var(--bg-tint); border-color: var(--primary); }
 .btn-photo--ghost { border-color: transparent; background: none; color: var(--secondary); }
+/* 數量：− [ n ] ＋。按鈕 rounded-full、輸入框 2px，照官網規則 */
+.qty { display: flex; align-items: center; gap: 8px; }
+.qty-label { font-size: 0.78rem; letter-spacing: 0.08em; color: var(--secondary); margin-right: 4px; }
+.qty-btn {
+	width: var(--tap-target-min);
+	height: var(--tap-target-min);
+	border-radius: 9999px;
+	border: 1px solid var(--border);
+	background: var(--bg-surface);
+	color: var(--primary);
+	font-size: 1.1rem;
+	cursor: pointer;
+	-webkit-tap-highlight-color: transparent;
+	transition: all 0.3s ease;
+}
+.qty-btn:hover:not(:disabled), .qty-btn:active:not(:disabled) { background: var(--bg-tint); border-color: var(--primary); }
+.qty-btn:disabled { opacity: 0.35; cursor: default; }
+.qty-input {
+	width: 56px;
+	height: var(--tap-target-min);
+	text-align: center;
+	border: 1px solid var(--border);
+	border-radius: 2px;
+	background: var(--bg-surface);
+	color: var(--primary);
+	font: inherit;
+	font-size: 1rem; /* 16px 以上，iOS 才不會在點進去時自動放大整頁 */
+	font-variant-numeric: tabular-nums;
+	-moz-appearance: textfield;
+}
+.qty-input::-webkit-outer-spin-button, .qty-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.result-qty { color: var(--secondary); font-weight: 700; }
 .photo-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .photo-note { font-size: 0.78rem; color: var(--secondary); letter-spacing: 0.04em; }
 .photo-note--warn { color: var(--danger); font-weight: 700; }

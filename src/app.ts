@@ -1,7 +1,7 @@
 import { ScannerService, ScanTarget } from './scanner.js';
 import { UIUtils } from './utils.js';
 import { Catalog, CatalogBook, normalizeISBN } from './catalog.js';
-import { calculateTotals, OrderTotals } from './pricing.js';
+import { calculateTotals, OrderLine, OrderTotals } from './pricing.js';
 import { getWebAppUrl, getSecret, saveSettings, submitOrder, OrderItem, OrderInfo, SubmitOutcome, PAYMENT_OPTIONS, PaymentMethod } from './sheet.js';
 import { CoverPhoto, nameCoverFile, saveCoversToDevice } from './coverPhoto.js';
 
@@ -14,7 +14,17 @@ interface BookRow {
 	candidates: CatalogBook[] | null;
 	/** 選中的候選 index；只有一本候選時自動選 0 */
 	selected: number | null;
+	/** 同一本買幾本，預設 1 */
+	quantity: number;
 }
+
+const MAX_QUANTITY = 99;
+
+/** 店員輸入的數量轉成 1–99 的整數；空白或亂打都退回 1。 */
+const clampQuantity = (raw: unknown): number => {
+	const n = Math.floor(Number(raw));
+	return Number.isFinite(n) ? Math.min(MAX_QUANTITY, Math.max(1, n)) : 1;
+};
 
 type ScanInto = { kind: 'carrier' } | { kind: 'isbn'; rowId: number };
 
@@ -77,7 +87,7 @@ class CheckoutApp {
 	// ======================== 表單 ========================
 
 	private addRow(): void {
-		this.rows.push({ id: this.nextRowId++, isbn: '', title: '', candidates: null, selected: null });
+		this.rows.push({ id: this.nextRowId++, isbn: '', title: '', candidates: null, selected: null, quantity: 1 });
 		this.renderRows();
 	}
 
@@ -182,10 +192,10 @@ class CheckoutApp {
 	// ======================== 確認 ========================
 
 	/** 目前已選定的書，用來算錢。 */
-	private selectedBooks(): CatalogBook[] {
+	private selectedLines(): OrderLine[] {
 		return this.rows
-			.map(r => (r.candidates && r.selected !== null ? r.candidates[r.selected] : null))
-			.filter((b): b is CatalogBook => b !== null);
+			.filter(r => r.candidates && r.selected !== null)
+			.map(r => ({ book: r.candidates![r.selected!], quantity: r.quantity }));
 	}
 
 	private renderReview(): void {
@@ -231,6 +241,13 @@ class CheckoutApp {
 							? `<p class="review-note${needsPick ? ' review-note--warn' : ''}">找到 ${row.candidates.length} 本相符，請選一本${needsPick ? '（尚未選擇）' : ''}</p>`
 							: ''}
 						<div class="candidates">${options}</div>
+						<div class="qty">
+							<span class="qty-label">數量</span>
+							<button class="qty-btn" data-qty-step="-1" data-row="${row.id}" aria-label="減一本" ${row.quantity <= 1 ? 'disabled' : ''}>−</button>
+							<input type="number" class="qty-input" data-qty="${row.id}" value="${row.quantity}"
+								min="1" max="${MAX_QUANTITY}" inputmode="numeric" aria-label="第 ${i + 1} 本的數量">
+							<button class="qty-btn" data-qty-step="1" data-row="${row.id}" aria-label="加一本" ${row.quantity >= MAX_QUANTITY ? 'disabled' : ''}>＋</button>
+						</div>
 						${this.photoBlock(row)}
 					</div>
 				</div>`;
@@ -238,6 +255,29 @@ class CheckoutApp {
 
 		list.querySelectorAll<HTMLButtonElement>('[data-photo]').forEach(btn => {
 			btn.addEventListener('click', () => this.takePhoto(Number(btn.dataset.photo)));
+		});
+
+		list.querySelectorAll<HTMLButtonElement>('[data-qty-step]').forEach(btn => {
+			btn.addEventListener('click', () => {
+				const row = this.rows.find(r => r.id === Number(btn.dataset.row));
+				if (!row) return;
+				row.quantity = clampQuantity(row.quantity + Number(btn.dataset.qtyStep));
+				this.renderReview();
+			});
+		});
+		list.querySelectorAll<HTMLInputElement>('input[data-qty]').forEach(input => {
+			const row = this.rows.find(r => r.id === Number(input.dataset.qty));
+			if (!row) return;
+			// 打字時只更新金額、不重畫明細，不然游標會跳走；離開欄位時再把值整理成 1–99
+			input.addEventListener('input', () => {
+				if (input.value.trim() === '') return;
+				row.quantity = clampQuantity(input.value);
+				this.renderTotals();
+			});
+			input.addEventListener('change', () => {
+				row.quantity = clampQuantity(input.value);
+				this.renderReview();
+			});
 		});
 		list.querySelectorAll<HTMLInputElement>('input[data-pick]').forEach(input => {
 			input.addEventListener('change', () => {
@@ -256,8 +296,8 @@ class CheckoutApp {
 		const submit = document.getElementById('btn-submit') as HTMLButtonElement | null;
 		if (!box) return;
 
-		const books = this.selectedBooks();
-		const t = calculateTotals(books);
+		const lines = this.selectedLines();
+		const t = calculateTotals(lines);
 
 		const pending = this.rows.filter(r => r.candidates && r.candidates.length > 1 && r.selected === null).length;
 		const missing = this.rows.filter(r => r.candidates && r.candidates.length === 0).length;
@@ -276,7 +316,7 @@ class CheckoutApp {
 			${missing > 0 ? `<p class="credit-hint credit-hint--warn">有 ${missing} 筆查不到，未計入</p>` : ''}`;
 
 		if (submit) {
-			submit.disabled = pending > 0 || books.length === 0;
+			submit.disabled = pending > 0 || lines.length === 0;
 			// 有拍封面時，按鈕直接寫明「送出並存」：按一次就會先存照片再送單
 			const photosToSave = this.unsavedPhotoCount();
 			const save = photosToSave > 0 ? `並存 ${photosToSave} 張封面` : '';
@@ -290,8 +330,8 @@ class CheckoutApp {
 	// ======================== 送出 ========================
 
 	private async handleSubmit(): Promise<void> {
-		const books = this.selectedBooks();
-		if (books.length === 0) return;
+		const lines = this.selectedLines();
+		if (lines.length === 0) return;
 
 		const name = (document.getElementById('input-name') as HTMLInputElement)?.value.trim() ?? '';
 		const payment = (document.getElementById('input-payment') as HTMLSelectElement)?.value ?? '';
@@ -328,19 +368,24 @@ class CheckoutApp {
 		if (this.submitting) return;
 		this.submitting = true;
 		try {
-			await this.submitOrderFlow(books, order);
+			await this.submitOrderFlow(lines, order);
 		} finally {
 			this.submitting = false;
 		}
 	}
 
-	private async submitOrderFlow(books: CatalogBook[], order: OrderInfo): Promise<void> {
+	private async submitOrderFlow(lines: OrderLine[], order: OrderInfo): Promise<void> {
 		// 先把這一單的封面一次存進相簿，再送出。順序不能反：分享選單只能在點擊後馬上叫，
 		// 等完寫入試算表的網路請求，iOS 就不讓叫了。取消或失敗都照樣送單，完成頁可以補存。
 		await this.saveAllPhotos();
 
-		const totals = calculateTotals(books);
-		const items: OrderItem[] = books.map(b => ({ isbn: b.isbn, title: b.title, price: b.price }));
+		const totals = calculateTotals(lines);
+		const items: OrderItem[] = lines.map(({ book, quantity }) => ({
+			isbn: book.isbn,
+			title: book.title,
+			price: book.price,
+			quantity
+		}));
 
 		const submit = document.getElementById('btn-submit') as HTMLButtonElement | null;
 		if (submit) {
@@ -354,7 +399,7 @@ class CheckoutApp {
 			? await submitOrder(url, secret, order, items)
 			: { status: 'error', message: '尚未設定 Apps Script 網址，這一單沒有寫進試算表。' };
 
-		this.renderResult(order, books, totals, outcome);
+		this.renderResult(order, lines, totals, outcome);
 		this.switchView('view-result');
 
 		if (submit) {
@@ -365,7 +410,7 @@ class CheckoutApp {
 
 	private renderResult(
 		order: OrderInfo,
-		books: CatalogBook[],
+		lines: OrderLine[],
 		totals: OrderTotals,
 		outcome: SubmitOutcome
 	): void {
@@ -394,11 +439,11 @@ class CheckoutApp {
 				${order.note ? `<div><span>備註</span><b>${UIUtils.escapeHtml(order.note)}</b></div>` : ''}
 			</div>
 			<ul class="result-books">
-				${books.map(b => `
+				${lines.map(({ book: b, quantity }) => `
 					<li>
-						<span class="result-book-title">${UIUtils.escapeHtml(b.title)}</span>
+						<span class="result-book-title">${UIUtils.escapeHtml(b.title)}${quantity > 1 ? ` <b class="result-qty">×${quantity}</b>` : ''}</span>
 						<span class="tag${b.isUsed ? ' tag--used' : ''}">${UIUtils.escapeHtml(b.condition || '未註記')}</span>
-						<span class="result-book-price">${money(b.price)}</span>
+						<span class="result-book-price">${money(b.price * quantity)}</span>
 					</li>`).join('')}
 			</ul>
 			<div class="totals">

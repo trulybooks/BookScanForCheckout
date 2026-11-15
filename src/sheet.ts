@@ -11,8 +11,17 @@ const SECRET_KEY = 'bookScanCheckout_secret';
 export interface OrderItem {
 	isbn: string;
 	title: string;
+	/** 單價（一本的定價）。金額由試算表的公式 數量 × 單價 自己算。 */
 	price: number;
+	quantity: number;
 }
+
+/**
+ * 這個前端需要的 Apps Script 版本。.gs 每次改 payload 就把它的 API_VERSION 加一，
+ * 這裡跟著改。部署的還是舊版時，新欄位會被默默忽略（例如數量都記成 1 本），
+ * 所以版本不夠就當成錯誤回報，不假裝成功。
+ */
+const REQUIRED_API_VERSION = 2;
 
 /** 付款方式。字串要跟試算表 M 欄的下拉選項一字不差（「台灣 Pay」有空格）。 */
 export const PAYMENT_OPTIONS = ['現金', '轉帳', '刷卡', '台灣 Pay', '文化幣'] as const;
@@ -95,7 +104,7 @@ export async function submitOrder(
 		}
 
 		const text = await res.text();
-		let parsed: { status?: string; rows?: number[]; orderId?: string; date?: string; message?: string };
+		let parsed: { status?: string; rows?: number[]; orderId?: string; date?: string; apiVersion?: number; message?: string };
 		try {
 			parsed = JSON.parse(text);
 		} catch {
@@ -104,11 +113,10 @@ export async function submitOrder(
 		}
 
 		if (parsed.status === 'ok' && Array.isArray(parsed.rows)) {
-			// 舊版 Apps Script 不會回 orderId——代表 .gs 還沒重新部署，訂單編號等欄位沒寫進去
-			if (!parsed.orderId) {
+			if (!parsed.orderId || (parsed.apiVersion ?? 1) < REQUIRED_API_VERSION) {
 				return {
 					status: 'error',
-					message: `書已寫入第 ${parsed.rows.join('、')} 列，但 Apps Script 還是舊版，訂單編號、日期、付款方式、備註都沒有寫。請重新部署 checkout_append.gs。`
+					message: `書已寫入第 ${parsed.rows.join('、')} 列，但 Apps Script 不是最新版，訂單編號、日期、付款方式、備註或數量可能沒有寫對。請到試算表手動補上，並重新部署 checkout_append.gs。不要再送一次，會重複記帳。`
 				};
 			}
 			return { status: 'ok', rows: parsed.rows, orderId: parsed.orderId, date: parsed.date ?? '' };

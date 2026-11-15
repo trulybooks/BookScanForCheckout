@@ -49,14 +49,22 @@ var COL_NAME = 3;     // C 姓名
 var COL_CARRIER = 4;  // D 會員編號/發票（發票載具編號）
 var COL_ISBN = 6;     // F ISBN
 var COL_ITEM = 7;    // G 商品
+var COL_QTY = 8;     // H 數量
 var COL_PRICE = 9;   // I 單價
 var COL_PAYMENT = 13; // M 付款方式
 var COL_NOTE = 16;    // P 備註
 //
-// ⚠️ 不要寫 J 欄（金額）。那是公式（數量 × 單價），填了 I 欄它就會自己算出來；
+// ⚠️ 不要寫 J 欄（金額）。那是公式（數量 × 單價），填了 H、I 欄它就會自己算出來；
 // 直接寫值會把公式蓋掉，之後那一列就不會再跟著變動。
 
 var MAX_ITEMS = 50;
+var MAX_QUANTITY = 99;
+
+// 這支腳本的介面版本，會回傳給前端。前端（src/sheet.ts 的 REQUIRED_API_VERSION）發現
+// 部署的是舊版就報錯，而不是讓新欄位被默默忽略。改了 payload 就把這個數字加一。
+//   1：姓名、載具、ISBN、商品、單價
+//   2：加上訂單編號、購買日期、付款方式、備註、數量
+var API_VERSION = 2;
 
 var TIMEZONE = 'Asia/Taipei';
 
@@ -180,6 +188,17 @@ function appendOrder_(order) {
   if (PAYMENT_OPTIONS.indexOf(order.payment) < 0) {
     throw new Error('付款方式不在選項裡：' + order.payment);
   }
+  // 數量先全部檢查完才開始寫，任何一本不合法就整單不寫，不會只寫一半
+  var quantities = [];
+  for (var q = 0; q < items.length; q++) {
+    // 沒帶數量的是還沒更新的前端，當作 1 本
+    var raw = items[q].quantity === undefined ? 1 : items[q].quantity;
+    var qty = Number(raw);
+    if (!(qty >= 1 && qty <= MAX_QUANTITY && Math.floor(qty) === qty)) {
+      throw new Error('數量要是 1 到 ' + MAX_QUANTITY + ' 的整數：' + items[q].title + ' 是 ' + raw);
+    }
+    quantities.push(qty);
+  }
 
   // 兩台裝置同時送單時，不鎖的話兩邊會拿到同一個訂單編號、寫到同樣的空白列。
   var lock = LockService.getScriptLock();
@@ -187,7 +206,7 @@ function appendOrder_(order) {
 
   try {
     var sheet = getSheet_();
-    assertNoArrayFormula_(sheet, [COL_ORDER_ID, COL_DATE, COL_PAYMENT, COL_NOTE]);
+    assertNoArrayFormula_(sheet, [COL_ORDER_ID, COL_DATE, COL_QTY, COL_PAYMENT, COL_NOTE]);
 
     var orderId = nextOrderId_(sheet);
     var date = Utilities.formatDate(new Date(), TIMEZONE, 'yyyy/MM/dd');
@@ -212,6 +231,7 @@ function appendOrder_(order) {
       // ISBN 設成純文字，否則 Google 會把 13 位數字轉成 9.78986E+12
       sheet.getRange(row, COL_ISBN).setNumberFormat('@').setValue(String(item.isbn || ''));
       sheet.getRange(row, COL_ITEM).setValue(String(item.title || ''));
+      sheet.getRange(row, COL_QTY).setValue(quantities[i]);
 
       var price = Number(item.price);
       if (isFinite(price) && price > 0) {
@@ -261,7 +281,8 @@ function doPost(e) {
       rows: result.rows,
       count: result.rows.length,
       orderId: result.orderId,
-      date: result.date
+      date: result.date,
+      apiVersion: API_VERSION
     });
   } catch (err) {
     return json_({ status: 'error', message: String(err && err.message || err) });
@@ -297,12 +318,13 @@ function testConnection() {
   assertConfigured_();
   var sheet = getSheet_();
   var rows = findWritableRows_(sheet, 3);
+  Logger.log('腳本版本：' + API_VERSION);
   Logger.log('分頁：' + sheet.getName());
   Logger.log('接下來三本會寫在第 ' + rows.join('、') + ' 列');
   Logger.log('下一單的訂單編號：' + nextOrderId_(sheet));
 
   // 會被覆寫的欄位現在是不是公式，寫之前先讓店主知道
-  var cols = [COL_ORDER_ID, COL_DATE, COL_PAYMENT, COL_NOTE];
+  var cols = [COL_ORDER_ID, COL_DATE, COL_QTY, COL_PAYMENT, COL_NOTE];
   for (var c = 0; c < cols.length; c++) {
     var f = sheet.getRange(rows[0], cols[c]).getFormula();
     Logger.log(columnLetter_(cols[c]) + rows[0] + '：' + (f ? '公式 ' + f : '不是公式'));
