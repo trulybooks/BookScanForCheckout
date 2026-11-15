@@ -521,6 +521,30 @@ main {
 }
 
 .review-item--missing { border-left: 4px solid rgba(156, 74, 63, 0.45); }
+.review-item--manual { border-left: 4px solid var(--accent); }
+
+/* 查不到的書：手動填寫。書名與 ISBN 各佔一整行（13 碼放半欄會被切掉），定價與新舊並排 */
+.manual-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.manual-grid .manual-wide { grid-column: 1 / -1; }
+.manual-grid .input-text { width: 100%; min-width: 0; }
+/* 必填沒填時框線變紅，不用重畫整張明細也看得出哪裡沒填 */
+.manual-grid .input-text:invalid { border-color: rgba(156, 74, 63, 0.55); }
+.seg { display: flex; gap: 6px; }
+.seg-opt { flex: 1; position: relative; }
+.seg-opt input { position: absolute; opacity: 0; pointer-events: none; }
+.seg-opt span {
+	display: flex; align-items: center; justify-content: center;
+	min-height: var(--tap-target-min);
+	border: 1px solid var(--border);
+	border-radius: 9999px;
+	background: var(--bg-surface);
+	font-size: 0.85rem;
+	color: var(--secondary);
+	cursor: pointer;
+	transition: all 0.3s ease;
+}
+.seg-opt input:checked + span { background: var(--primary); border-color: var(--primary); color: var(--light); }
+.seg-opt input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
 .review-body { min-width: 0; display: flex; flex-direction: column; gap: 7px; }
 
 .review-no {

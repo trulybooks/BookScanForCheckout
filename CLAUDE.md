@@ -10,10 +10,23 @@ esbuild, deployed as static files to GitHub Pages on every push to `main`.
 ## The flow, and why it's in this order
 
 1. **Books** — ISBN and/or title per row, scan button per row. No buyer details here.
-2. **Confirm** — candidates to pick, totals and store credit, a cover photo per book, and only
+2. **Confirm** — candidates to pick (or, for a book the catalogue doesn't have, a form to fill
+   in by hand — see below), totals and store credit, a cover photo per book, and only
    *then* the buyer's name, invoice carrier, payment method (required) and a free-text note. The shop wants the books and the money settled
    before asking who's paying. The name is validated on submit, not on lookup.
 3. **Done** — write result, and any cover photos not yet saved.
+
+### Books the catalogue doesn't have
+
+They are **not dropped**. Stock sometimes reaches the shelf before it reaches the catalogue
+sheet, and the sale still has to be recorded. A row with no match gets `BookRow.manual`: title
+and price required (whole NT$, 1–100000), ISBN optional and pre-filled from what was typed,
+new/used defaulting to new — the same rule as before for anything not marked 舊書 — and it
+counts toward the store-credit threshold if marked used. Until title and price are valid the
+row isn't counted and submit stays disabled (還有 N 本資料未填完). Typing updates totals without
+re-rendering, so the cursor stays put; `:invalid` styling shows which field is missing.
+Manual rows are written to the sheet exactly like catalogue books, and show as `新書・手動` /
+`舊書・手動` on the Done screen. Going back and looking up again keeps what was filled in.
 
 ### Cover photos (`coverPhoto.ts`)
 

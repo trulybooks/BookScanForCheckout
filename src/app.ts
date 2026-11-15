@@ -16,6 +16,37 @@ interface BookRow {
 	selected: number | null;
 	/** 同一本買幾本，預設 1 */
 	quantity: number;
+	/**
+	 * 書目裡查不到時，店長手動補的資料。可能是漏入庫的商品，照樣要能賣、要能記帳，
+	 * 所以不排除，而是讓店長把書名、定價、新舊填完整。查得到的書是 undefined。
+	 */
+	manual?: ManualEntry;
+}
+
+interface ManualEntry {
+	isbn: string;
+	title: string;
+	/** 保留輸入框的原始字串，驗證在 manualBook() 做 */
+	price: string;
+	used: boolean;
+}
+
+const MAX_MANUAL_PRICE = 100000;
+
+/** 手動資料填完整了才回傳一本書；書名與正整數定價是必填。 */
+function manualBook(m: ManualEntry | undefined): CatalogBook | null {
+	if (!m) return null;
+	const title = m.title.trim();
+	const price = Number(m.price);
+	if (!title || !Number.isInteger(price) || price < 1 || price > MAX_MANUAL_PRICE) return null;
+	return {
+		isbn: normalizeISBN(m.isbn),
+		title,
+		author: '',
+		price,
+		condition: `${m.used ? '舊書' : '新書'}・手動`,
+		isUsed: m.used
+	};
 }
 
 const MAX_QUANTITY = 99;
@@ -189,6 +220,10 @@ class CheckoutApp {
 			row.candidates = this.catalog.find(row.isbn, row.title);
 			// 只有一本候選就先選好，店員不必多點一次
 			row.selected = row.candidates.length === 1 ? 0 : null;
+			// 查不到就改成手動填。回去修改再查一次時，保留已經填過的定價等資料
+			row.manual = row.candidates.length === 0
+				? (row.manual ?? { isbn: row.isbn.trim(), title: row.title.trim(), price: '', used: false })
+				: undefined;
 		}
 
 		this.rows = filled;
@@ -203,8 +238,14 @@ class CheckoutApp {
 	/** 目前已選定的書，用來算錢。 */
 	private selectedLines(): OrderLine[] {
 		return this.rows
-			.filter(r => r.candidates && r.selected !== null)
-			.map(r => ({ book: r.candidates![r.selected!], quantity: r.quantity }));
+			.map(r => ({ book: this.rowBook(r), quantity: r.quantity }))
+			.filter((l): l is OrderLine => l.book !== null);
+	}
+
+	/** 這一列要賣的書：查到的選中那本，或店長手動填完整的資料。 */
+	private rowBook(r: BookRow): CatalogBook | null {
+		if (r.manual) return manualBook(r.manual);
+		return r.candidates && r.selected !== null ? r.candidates[r.selected] : null;
 	}
 
 	private renderReview(): void {
@@ -214,16 +255,46 @@ class CheckoutApp {
 		list.innerHTML = this.rows.map((row, i) => {
 			const typed = [row.isbn.trim(), row.title.trim()].filter(Boolean).join('　');
 
-			if (!row.candidates || row.candidates.length === 0) {
+			if (row.manual) {
+				const m = row.manual;
 				return `
-					<div class="review-item review-item--missing">
+					<div class="review-item review-item--manual">
 						<span class="review-no">${i + 1}</span>
 						<div class="review-body">
 							<p class="review-typed">${UIUtils.escapeHtml(typed)}</p>
-							<p class="review-note review-note--warn">書目裡查不到，這一筆不會計入金額，也不會寫進試算表。</p>
+							<p class="review-note review-note--warn">書目裡查不到（可能還沒入庫），請手動填寫</p>
+							<div class="manual-grid">
+								<label class="field manual-wide">
+									<span class="field-label">書名 ＊</span>
+									<input type="text" class="input-text" data-manual="title" data-row="${row.id}"
+										value="${UIUtils.escapeAttr(m.title)}" required autocomplete="off">
+								</label>
+								<label class="field manual-wide">
+									<span class="field-label">ISBN</span>
+									<input type="text" class="input-text" data-manual="isbn" data-row="${row.id}"
+										value="${UIUtils.escapeAttr(m.isbn)}" inputmode="numeric" autocomplete="off" placeholder="可留空">
+								</label>
+								<label class="field">
+									<span class="field-label">定價 ＊</span>
+									<input type="number" class="input-text" data-manual="price" data-row="${row.id}"
+										value="${UIUtils.escapeAttr(m.price)}" required min="1" max="${MAX_MANUAL_PRICE}" step="1"
+										inputmode="numeric" placeholder="NT$">
+								</label>
+								<div class="field">
+									<span class="field-label">新舊</span>
+									<div class="seg">
+										<label class="seg-opt"><input type="radio" name="cond-${row.id}" value="new" data-manual="used" data-row="${row.id}" ${m.used ? '' : 'checked'}><span>新書</span></label>
+										<label class="seg-opt"><input type="radio" name="cond-${row.id}" value="used" data-manual="used" data-row="${row.id}" ${m.used ? 'checked' : ''}><span>舊書</span></label>
+									</div>
+								</div>
+							</div>
+							${this.qtyBlock(row, i)}
+							${this.photoBlock(row)}
 						</div>
 					</div>`;
 			}
+
+			if (!row.candidates || row.candidates.length === 0) return '';
 
 			const needsPick = row.candidates.length > 1 && row.selected === null;
 
@@ -250,13 +321,7 @@ class CheckoutApp {
 							? `<p class="review-note${needsPick ? ' review-note--warn' : ''}">找到 ${row.candidates.length} 本相符，請選一本${needsPick ? '（尚未選擇）' : ''}</p>`
 							: ''}
 						<div class="candidates">${options}</div>
-						<div class="qty">
-							<span class="qty-label">數量</span>
-							<button class="qty-btn" data-qty-step="-1" data-row="${row.id}" aria-label="減一本" ${row.quantity <= 1 ? 'disabled' : ''}>−</button>
-							<input type="number" class="qty-input" data-qty="${row.id}" value="${row.quantity}"
-								min="1" max="${MAX_QUANTITY}" inputmode="numeric" aria-label="第 ${i + 1} 本的數量">
-							<button class="qty-btn" data-qty-step="1" data-row="${row.id}" aria-label="加一本" ${row.quantity >= MAX_QUANTITY ? 'disabled' : ''}>＋</button>
-						</div>
+						${this.qtyBlock(row, i)}
 						${this.photoBlock(row)}
 					</div>
 				</div>`;
@@ -264,6 +329,22 @@ class CheckoutApp {
 
 		list.querySelectorAll<HTMLButtonElement>('[data-photo]').forEach(btn => {
 			btn.addEventListener('click', () => this.takePhoto(Number(btn.dataset.photo)));
+		});
+
+		list.querySelectorAll<HTMLInputElement>('input[data-manual]').forEach(input => {
+			const row = this.rows.find(r => r.id === Number(input.dataset.row));
+			if (!row?.manual) return;
+			const m = row.manual;
+			const field = input.dataset.manual;
+			const update = () => {
+				if (field === 'used') {
+					if (input.checked) m.used = input.value === 'used';
+				} else if (field === 'title' || field === 'isbn' || field === 'price') {
+					m[field] = input.value;
+				}
+				this.renderTotals();
+			};
+			input.addEventListener(field === 'used' ? 'change' : 'input', update);
 		});
 
 		list.querySelectorAll<HTMLButtonElement>('[data-qty-step]').forEach(btn => {
@@ -300,6 +381,17 @@ class CheckoutApp {
 		this.renderTotals();
 	}
 
+	private qtyBlock(row: BookRow, i: number): string {
+		return `
+			<div class="qty">
+				<span class="qty-label">數量</span>
+				<button class="qty-btn" data-qty-step="-1" data-row="${row.id}" aria-label="減一本" ${row.quantity <= 1 ? 'disabled' : ''}>−</button>
+				<input type="number" class="qty-input" data-qty="${row.id}" value="${row.quantity}"
+					min="1" max="${MAX_QUANTITY}" inputmode="numeric" aria-label="第 ${i + 1} 本的數量">
+				<button class="qty-btn" data-qty-step="1" data-row="${row.id}" aria-label="加一本" ${row.quantity >= MAX_QUANTITY ? 'disabled' : ''}>＋</button>
+			</div>`;
+	}
+
 	private renderTotals(): void {
 		const box = document.getElementById('totals');
 		const submit = document.getElementById('btn-submit') as HTMLButtonElement | null;
@@ -308,8 +400,8 @@ class CheckoutApp {
 		const lines = this.selectedLines();
 		const t = calculateTotals(lines);
 
-		const pending = this.rows.filter(r => r.candidates && r.candidates.length > 1 && r.selected === null).length;
-		const missing = this.rows.filter(r => r.candidates && r.candidates.length === 0).length;
+		const pending = this.rows.filter(r => !r.manual && r.candidates && r.candidates.length > 1 && r.selected === null).length;
+		const incomplete = this.rows.filter(r => r.manual && !manualBook(r.manual)).length;
 
 		box.innerHTML = `
 			<div class="total-line"><span>新書小計</span><span>${money(t.newSubtotal)}</span></div>
@@ -322,7 +414,7 @@ class CheckoutApp {
 			${t.toNextTier
 				? `<p class="credit-hint">舊書再買 ${money(t.toNextTier.needed)} 可拿 ${money(t.toNextTier.credit)} 購物金</p>`
 				: (t.credit > 0 ? `<p class="credit-hint">已達最高級距</p>` : '')}
-			${missing > 0 ? `<p class="credit-hint credit-hint--warn">有 ${missing} 筆查不到，未計入</p>` : ''}`;
+			${incomplete > 0 ? `<p class="credit-hint credit-hint--warn">有 ${incomplete} 本手動資料還沒填完，未計入</p>` : ''}`;
 
 		const hint = document.getElementById('note-auto');
 		if (hint) {
@@ -331,13 +423,14 @@ class CheckoutApp {
 		}
 
 		if (submit) {
-			submit.disabled = pending > 0 || lines.length === 0;
+			submit.disabled = pending > 0 || incomplete > 0 || lines.length === 0;
 			// 有拍封面時，按鈕直接寫明「送出並存」：按一次就會先存照片再送單
 			const photosToSave = this.unsavedPhotoCount();
 			const save = photosToSave > 0 ? `並存 ${photosToSave} 張封面` : '';
 			const warned = this.missingPhotosAcknowledged && this.rowsMissingPhoto().length > 0;
 			submit.textContent = pending > 0
 				? `還有 ${pending} 本未選擇`
+				: incomplete > 0 ? `還有 ${incomplete} 本資料未填完`
 				: warned ? `仍要送出${save}` : save ? `送出${save}` : '確認送出';
 		}
 	}
@@ -523,8 +616,8 @@ class CheckoutApp {
 		if (!file || rowId === null) return;
 
 		const row = this.rows.find(r => r.id === rowId);
-		const book = row?.candidates && row.selected !== null ? row.candidates[row.selected] : null;
-		const named = nameCoverFile(file, book?.isbn || row?.isbn.trim() || '');
+		const book = row ? this.rowBook(row) : null;
+		const named = nameCoverFile(file, book?.isbn || row?.manual?.isbn.trim() || row?.isbn.trim() || '');
 
 		const old = this.photos.get(rowId);
 		if (old) URL.revokeObjectURL(old.url);
@@ -579,7 +672,7 @@ class CheckoutApp {
 	private rowsMissingPhoto(): number[] {
 		return this.rows
 			.map((r, i) => ({ r, no: i + 1 }))
-			.filter(({ r }) => r.candidates && r.candidates.length > 0 && !this.photos.has(r.id))
+			.filter(({ r }) => (r.manual || (r.candidates && r.candidates.length > 0)) && !this.photos.has(r.id))
 			.map(({ no }) => no);
 	}
 
