@@ -30,6 +30,15 @@ type ScanInto = { kind: 'carrier' } | { kind: 'isbn'; rowId: number };
 
 const money = (n: number) => `NT$ ${n.toLocaleString('en-US')}`;
 
+/**
+ * 有送購物金時，自動寫進備註的那一段，例如「贈300元購書金編號」。
+ * 購書金的編號由店長之後在試算表裡接在「編號」後面補上，所以這段一定放在備註的
+ * **最後面**——店員自己寫的備註在前、用「；」隔開，店長點進格子直接在結尾打編號就好。
+ */
+const creditNote = (credit: number) => (credit > 0 ? `贈${credit}元購書金編號` : '');
+const composeNote = (credit: number, typed: string) =>
+	[typed.trim(), creditNote(credit)].filter(Boolean).join('；');
+
 class CheckoutApp {
 	private scanner = new ScannerService();
 	private catalog = new Catalog();
@@ -315,6 +324,12 @@ class CheckoutApp {
 				: (t.credit > 0 ? `<p class="credit-hint">已達最高級距</p>` : '')}
 			${missing > 0 ? `<p class="credit-hint credit-hint--warn">有 ${missing} 筆查不到，未計入</p>` : ''}`;
 
+		const hint = document.getElementById('note-auto');
+		if (hint) {
+			hint.textContent = t.credit > 0 ? `送出時會自動在備註最後加上「${creditNote(t.credit)}」，編號請店長在試算表補上` : '';
+			hint.classList.toggle('hidden', t.credit === 0);
+		}
+
 		if (submit) {
 			submit.disabled = pending > 0 || lines.length === 0;
 			// 有拍封面時，按鈕直接寫明「送出並存」：按一次就會先存照片再送單
@@ -362,7 +377,10 @@ class CheckoutApp {
 			name,
 			carrier: (document.getElementById('input-carrier') as HTMLInputElement)?.value.trim() ?? '',
 			payment: payment as PaymentMethod,
-			note: (document.getElementById('input-note') as HTMLTextAreaElement)?.value.trim() ?? ''
+			note: composeNote(
+				calculateTotals(lines).credit,
+				(document.getElementById('input-note') as HTMLTextAreaElement)?.value ?? ''
+			)
 		};
 
 		if (this.submitting) return;

@@ -87,6 +87,11 @@ payload means changing both.
   script checks A/B/M/P first and refuses the order if it finds one. `testConnection()`
   reports the next order number and whether the target cells hold formulas.
 - 備註 is written as plain text, so a note beginning with `=` is never evaluated.
+- **Store credit goes into 備註 automatically**, as `贈300元購書金編號` — the manager types the
+  voucher number after 編號 in the sheet later. It is composed in the browser (`composeNote`)
+  and always placed **last**, after the operator's own note and a `；`, so the number can be
+  typed straight at the end of the cell. The note field is capped at 400 characters so the
+  `.gs`'s 500-character cut can never chop the credit text off.
 
 - **The carrier is written as text.** It starts with `/`, which Google otherwise takes for the
   start of a formula and renders as `#ERROR!`.
