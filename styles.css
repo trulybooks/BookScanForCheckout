@@ -317,6 +317,21 @@ main {
 	padding-left: 10px;
 }
 
+/* 設定頁：密鑰長度／末四碼，跟 Apps Script 的 testConnection() 紀錄對照用 */
+.modal-content .secret-hint { font-size: 0.8rem; color: var(--secondary); margin-top: 6px; }
+#btn-test-connection { margin-top: 10px; }
+.connection-result {
+	margin-top: 10px;
+	font-size: 0.85rem;
+	line-height: 1.6;
+	padding: 10px 12px;
+	border-radius: 2px;
+	border: 1px solid var(--border);
+	border-left: 4px solid var(--accent);
+}
+.connection-result--ok { border-left-color: var(--deco); background: var(--bg-tint); }
+.connection-result--err { border-left-color: var(--danger); color: var(--danger); background: rgba(156, 74, 63, 0.07); }
+
 .modal-actions {
 	display: flex;
 	gap: 10px;
@@ -667,6 +682,11 @@ main {
 .banner--ok { background: var(--bg-tint); border-left: 4px solid var(--deco); color: var(--primary); }
 .banner--warn { background: rgba(212, 197, 176, 0.25); border-left: 4px solid var(--accent); color: var(--primary); }
 .banner--err { background: rgba(156, 74, 63, 0.07); border-left: 4px solid var(--danger); color: var(--danger); }
+
+/* 寫入失敗時的結帳資料圖：整張顯示，長按就能加入照片 */
+#result-receipt { display: flex; flex-direction: column; gap: 10px; }
+#result-receipt:empty { display: none; }
+.receipt-preview { width: 100%; height: auto; border: 1px solid var(--border); border-radius: 2px; }
 
 .result-meta { display: flex; flex-direction: column; gap: 5px; font-size: 0.85rem; }
 .result-meta div { display: flex; justify-content: space-between; border-bottom: 1px solid var(--border); padding-bottom: 5px; }

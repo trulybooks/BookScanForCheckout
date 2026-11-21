@@ -43,7 +43,8 @@ var HEADER_ROW = 2;
 var FIRST_DATA_ROW = 3;
 
 // 1-indexed 欄位位置。只寫下面這幾欄，其餘維持原樣。
-var COL_ORDER_ID = 1; // A 訂單編號（同一單每一列都是同一個編號）
+//
+// ⚠️ 不寫 A 欄（訂單編號）。店長在試算表裡用公式自己算（版本 4 起），寫值會把公式蓋掉。
 var COL_DATE = 2;     // B 購買日期
 var COL_NAME = 3;     // C 姓名
 var COL_CARRIER = 4;  // D 會員編號/發票（發票載具編號）
@@ -65,7 +66,8 @@ var MAX_QUANTITY = 99;
 //   1：姓名、載具、ISBN、商品、單價
 //   2：加上訂單編號、購買日期、付款方式、備註、數量
 //   3：每一本書可以帶自己的備註（item.note），例如手動輸入的書要標「進貨無此書」
-var API_VERSION = 3;
+//   4：不再產生、也不寫入訂單編號（A 欄改由試算表公式計算）
+var API_VERSION = 4;
 
 var TIMEZONE = 'Asia/Taipei';
 
@@ -83,8 +85,17 @@ function assertConfigured_() {
   }
 }
 
+/**
+ * 兩邊都去掉空白、換行與看不見的字元（零寬空白、BOM）再比。貼上時常常夾帶這些，
+ * 肉眼看不出來，卻會讓每一單都「密鑰不符」。掃描器端（src/sheet.ts 的 cleanSecret）
+ * 用同一個規則，兩邊要一起改。
+ */
+function cleanSecret_(raw) {
+  return String(raw || '').replace(/[\s\u200B-\u200D\u2060\uFEFF]/g, '');
+}
+
 function checkSecret_(provided) {
-  if (String(provided || '') !== SHARED_SECRET) {
+  if (cleanSecret_(provided) !== cleanSecret_(SHARED_SECRET)) {
     throw new Error('密鑰不符');
   }
 }
@@ -130,35 +141,6 @@ function findWritableRows_(sheet, count) {
 }
 
 /**
- * 今天的下一個訂單編號：TB + yymmdd + 三位流水號，例如 TB261115005。
- *
- * 只看「已經有書」（ISBN 或商品有填）的列。空白列的 A 欄預先填好了下一個編號
- * （店裡的表單是這樣準備的），把它們算進來會跳號。
- */
-function nextOrderId_(sheet) {
-  var prefix = 'TB' + Utilities.formatDate(new Date(), TIMEZONE, 'yyMMdd');
-  var lastRow = sheet.getLastRow();
-  var max = 0;
-
-  if (lastRow >= FIRST_DATA_ROW) {
-    var height = lastRow - FIRST_DATA_ROW + 1;
-    var ids = sheet.getRange(FIRST_DATA_ROW, COL_ORDER_ID, height, 1).getValues();
-    var isbns = sheet.getRange(FIRST_DATA_ROW, COL_ISBN, height, 1).getValues();
-    var items = sheet.getRange(FIRST_DATA_ROW, COL_ITEM, height, 1).getValues();
-
-    for (var i = 0; i < height; i++) {
-      var used = String(isbns[i][0]).trim() !== '' || String(items[i][0]).trim() !== '';
-      if (!used) continue;
-      var m = String(ids[i][0]).trim().match(/^TB(\d{6})(\d{3})$/);
-      if (m && 'TB' + m[1] === prefix) max = Math.max(max, Number(m[2]));
-    }
-  }
-
-  if (max >= 999) throw new Error('今天的訂單編號已用完（999）');
-  return prefix + ('00' + (max + 1)).slice(-3);
-}
-
-/**
  * 寫值會蓋掉該格的公式。一般的逐列公式只影響寫到的那幾列，沒關係；但如果那一欄是
  * 從上方某格用 ARRAYFORMULA 整片展開的，在中間寫值會讓整欄變成 #REF!。
  * 唯讀的 CSV 看不出公式，所以寫之前檢查，有就整單拒絕、不冒險。
@@ -177,6 +159,9 @@ function assertNoArrayFormula_(sheet, cols) {
     }
   }
 }
+
+// 會寫值、可能原本有公式的欄位。寫入前與 testConnection() 都檢查這幾欄。
+var WRITTEN_FORMULA_COLS = [COL_DATE, COL_QTY, COL_PAYMENT, COL_NOTE];
 
 function columnLetter_(col) {
   return String.fromCharCode(64 + col);
@@ -201,15 +186,14 @@ function appendOrder_(order) {
     quantities.push(qty);
   }
 
-  // 兩台裝置同時送單時，不鎖的話兩邊會拿到同一個訂單編號、寫到同樣的空白列。
+  // 兩台裝置同時送單時，不鎖的話兩邊會找到同樣的空白列，後送的那單蓋掉先送的。
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(20000)) throw new Error('另一單正在寫入，請稍後再送一次');
 
   try {
     var sheet = getSheet_();
-    assertNoArrayFormula_(sheet, [COL_ORDER_ID, COL_DATE, COL_QTY, COL_PAYMENT, COL_NOTE]);
+    assertNoArrayFormula_(sheet, WRITTEN_FORMULA_COLS);
 
-    var orderId = nextOrderId_(sheet);
     var date = Utilities.formatDate(new Date(), TIMEZONE, 'yyyy/MM/dd');
     var rows = findWritableRows_(sheet, items.length);
 
@@ -217,9 +201,8 @@ function appendOrder_(order) {
       var row = rows[i];
       var item = items[i];
 
-      // 訂單編號、日期、姓名、載具、付款方式、備註都屬於整單，每一列都填，
+      // 日期、姓名、載具、付款方式、備註都屬於整單，每一列都填，
       // 店主看任何一列都知道這是哪一單。
-      sheet.getRange(row, COL_ORDER_ID).setValue(orderId);
       // 用字串寫入，Google 會跟手打一樣把它認成日期
       sheet.getRange(row, COL_DATE).setValue(date);
       sheet.getRange(row, COL_NAME).setValue(order.name);
@@ -250,7 +233,7 @@ function appendOrder_(order) {
     }
 
     SpreadsheetApp.flush();
-    return { rows: rows, orderId: orderId, date: date };
+    return { rows: rows, date: date };
   } finally {
     lock.releaseLock();
   }
@@ -283,7 +266,6 @@ function doPost(e) {
       status: 'ok',
       rows: result.rows,
       count: result.rows.length,
-      orderId: result.orderId,
       date: result.date,
       apiVersion: API_VERSION
     });
@@ -293,19 +275,27 @@ function doPost(e) {
 }
 
 /**
- * 讓前端在送單前確認網址、密鑰與權限都正常。
+ * 掃描器設定頁的「測試連線」用這個確認網址、密鑰與權限都正常。
  * 純讀取，不寫入任何東西，也不回傳試算表的內容。
+ *
+ * 直接用瀏覽器打開 …/exec 網址時沒有帶密鑰，一定會看到「密鑰不符」——那是正常的，
+ * 不代表掃描器設定錯。訊息裡講清楚，免得被當成故障。
  */
 function doGet(e) {
+  var provided = e && e.parameter && e.parameter.secret;
   try {
     assertConfigured_();
-    checkSecret_(e && e.parameter && e.parameter.secret);
+    if (!provided) {
+      return json_({ status: 'error', apiVersion: API_VERSION,
+        message: '網址是通的（腳本版本 ' + API_VERSION + '）。用瀏覽器直接開沒有帶密鑰，所以不能寫入；請改用掃描器設定頁的「測試連線」。' });
+    }
+    checkSecret_(provided);
 
     var sheet = getSheet_();
     var rows = findWritableRows_(sheet, 1);
-    return json_({ status: 'ok', sheet: sheet.getName(), nextRow: rows[0] });
+    return json_({ status: 'ok', sheet: sheet.getName(), nextRow: rows[0], apiVersion: API_VERSION });
   } catch (err) {
-    return json_({ status: 'error', message: String(err && err.message || err) });
+    return json_({ status: 'error', message: String(err && err.message || err), apiVersion: API_VERSION });
   }
 }
 
@@ -324,10 +314,12 @@ function testConnection() {
   Logger.log('腳本版本：' + API_VERSION);
   Logger.log('分頁：' + sheet.getName());
   Logger.log('接下來三本會寫在第 ' + rows.join('、') + ' 列');
-  Logger.log('下一單的訂單編號：' + nextOrderId_(sheet));
+  // 跟掃描器設定頁顯示的對照。只印長度和最後四個字，不印整串。
+  var secret = cleanSecret_(SHARED_SECRET);
+  Logger.log('密鑰：' + secret.length + ' 個字，最後四個字是「' + secret.slice(-4) + '」');
 
   // 會被覆寫的欄位現在是不是公式，寫之前先讓店主知道
-  var cols = [COL_ORDER_ID, COL_DATE, COL_QTY, COL_PAYMENT, COL_NOTE];
+  var cols = WRITTEN_FORMULA_COLS;
   for (var c = 0; c < cols.length; c++) {
     var f = sheet.getRange(rows[0], cols[c]).getFormula();
     Logger.log(columnLetter_(cols[c]) + rows[0] + '：' + (f ? '公式 ' + f : '不是公式'));

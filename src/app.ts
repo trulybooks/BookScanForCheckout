@@ -2,8 +2,9 @@ import { ScannerService, ScanTarget } from './scanner.js';
 import { UIUtils } from './utils.js';
 import { Catalog, CatalogBook, normalizeISBN } from './catalog.js';
 import { calculateTotals, OrderLine, OrderTotals } from './pricing.js';
-import { getWebAppUrl, getSecret, saveSettings, submitOrder, OrderItem, OrderInfo, SubmitOutcome, PAYMENT_OPTIONS, PaymentMethod } from './sheet.js';
+import { getWebAppUrl, getSecret, saveSettings, submitOrder, testConnection, cleanSecret, describeSecret, OrderItem, OrderInfo, SubmitOutcome, PAYMENT_OPTIONS, PaymentMethod } from './sheet.js';
 import { CoverPhoto, nameCoverFile, saveCoversToDevice } from './coverPhoto.js';
+import { renderReceipt } from './receiptImage.js';
 
 /** 表單上的一列書。查詢前只有店員輸入的內容。 */
 interface BookRow {
@@ -106,6 +107,11 @@ class CheckoutApp {
 	 * 改成第一次按送出時只提醒，再按一次才送——第二次是新的點擊，分享選單照常能叫。
 	 */
 	private missingPhotosAcknowledged = false;
+	/**
+	 * 寫入失敗或無法確認時畫好的結帳資料圖。先畫好放著，按鈕按下去才能立刻叫分享選單
+	 * ——在點擊裡才開始畫，等待畫圖的時間可能讓 iOS 判定手勢過期。
+	 */
+	private receipt: { file: File; url: string; saved: boolean } | null = null;
 
 	constructor() {
 		this.bindEvents();
@@ -560,7 +566,7 @@ class CheckoutApp {
 
 		const banner =
 			outcome.status === 'ok'
-				? `<div class="banner banner--ok" id="write-banner">已寫入試算表第 ${outcome.rows.join('、')} 列</div>`
+				? `<div class="banner banner--ok" id="write-banner">已寫入試算表第 ${outcome.rows.join('、')} 列</div>${outcome.warnings.length ? `<div class="banner banner--warn" id="write-warning">${outcome.warnings.map(w => UIUtils.escapeHtml(w)).join('<br>')}</div>` : ''}`
 				: outcome.status === 'unconfirmed'
 					? `<div class="banner banner--warn" id="write-banner">單已送出，但瀏覽器讀不到回應，<b>無法確認是否寫入</b>。請到試算表確認後再關閉這一頁。</div>`
 					: `<div class="banner banner--err" id="write-banner">沒有寫入試算表：${UIUtils.escapeHtml(outcome.message)}</div>`;
@@ -571,8 +577,7 @@ class CheckoutApp {
 			${banner}
 			<div class="result-meta">
 				${outcome.status === 'ok' ? `
-					<div><span>訂單編號</span><b id="result-order-id">${UIUtils.escapeHtml(outcome.orderId)}</b></div>
-					<div><span>購買日期</span><b>${UIUtils.escapeHtml(outcome.date)}</b></div>` : ''}
+					<div><span>購買日期</span><b id="result-date">${UIUtils.escapeHtml(outcome.date)}</b></div>` : ''}
 				<div><span>購買人</span><b>${UIUtils.escapeHtml(order.name)}</b></div>
 				${order.carrier ? `<div><span>發票載具</span><b>${UIUtils.escapeHtml(order.carrier)}</b></div>` : ''}
 				<div><span>付款方式</span><b>${UIUtils.escapeHtml(order.payment)}</b></div>
@@ -590,14 +595,82 @@ class CheckoutApp {
 				<div class="total-line total-line--main"><span>應付總額</span><span id="result-total">${money(totals.total)}</span></div>
 				<div class="credit"><span class="credit-label">贈送購物金</span><span class="credit-value" id="result-credit">${money(totals.credit)}</span></div>
 			</div>
+			<div id="result-receipt"></div>
 			<div id="result-photos"></div>`;
 		this.renderResultPhotos();
+
+		this.clearReceipt();
+		if (outcome.status !== 'ok') {
+			const reason = outcome.status === 'unconfirmed'
+				? '單已送出，但讀不到回應，無法確認是否寫入。'
+				: `沒有寫入試算表：${outcome.message}`;
+			this.prepareReceipt(order, lines, totals, reason);
+		}
+	}
+
+	// ======================== 寫入失敗時的結帳資料圖 ========================
+
+	private async prepareReceipt(order: OrderInfo, lines: OrderLine[], totals: OrderTotals, reason: string): Promise<void> {
+		const box = document.getElementById('result-receipt');
+		if (box) box.innerHTML = `<div class="banner banner--warn">正在產生結帳資料截圖…</div>`;
+		try {
+			const file = await renderReceipt({ order, lines, totals, reason });
+			this.receipt = { file, url: URL.createObjectURL(file), saved: false };
+		} catch (error) {
+			console.error(error);
+			if (box) box.innerHTML = `<div class="banner banner--err">結帳資料截圖產生失敗，請直接用手機截圖這一頁。</div>`;
+			return;
+		}
+		this.renderReceiptBox();
+	}
+
+	private renderReceiptBox(): void {
+		const box = document.getElementById('result-receipt');
+		if (!box || !this.receipt) return;
+		const { url, saved } = this.receipt;
+		box.innerHTML = `
+			<div class="banner ${saved ? 'banner--ok' : 'banner--warn'}" id="receipt-status">
+				${saved ? '✓ 結帳資料截圖已存。' : '這一單沒有確定寫進試算表。<b>先把結帳資料存成圖片</b>，之後照著補，資料才不會不見。'}
+				（也可以長按下面的圖「加入照片」）
+			</div>
+			<img class="receipt-preview" id="receipt-preview" src="${url}" alt="這一單的結帳資料">
+			<button id="btn-save-receipt" class="btn ${saved ? 'btn-secondary' : 'btn-primary'} btn-large">${saved ? '再存一次結帳資料截圖' : '📷 存結帳資料截圖'}</button>`;
+		document.getElementById('btn-save-receipt')?.addEventListener('click', () => this.saveReceipt());
+	}
+
+	/** 必須由點擊直接呼叫，跟存封面一樣。 */
+	private async saveReceipt(): Promise<void> {
+		const receipt = this.receipt;
+		if (!receipt) return;
+		try {
+			const outcome = await saveCoversToDevice([receipt.file]);
+			if (outcome === 'cancelled') return;
+			receipt.saved = true;
+			if (outcome === 'downloaded') UIUtils.showToast('已下載結帳資料截圖', 2000);
+		} catch (error) {
+			console.error(error);
+			UIUtils.showToast('沒有存成功，請長按圖片「加入照片」，或直接截圖這一頁', 4000);
+		}
+		this.renderReceiptBox();
+	}
+
+	private clearReceipt(): void {
+		if (this.receipt) URL.revokeObjectURL(this.receipt.url);
+		this.receipt = null;
+		const box = document.getElementById('result-receipt');
+		if (box) box.innerHTML = '';
 	}
 
 	private resetOrder(): void {
 		const unsaved = this.unsavedPhotoCount();
-		if (unsaved > 0 && !confirm(`有 ${unsaved} 張封面還沒存到相簿，開始下一單就會清掉。確定嗎？`)) return;
+		const receiptUnsaved = !!this.receipt && !this.receipt.saved;
+		const warn = [
+			receiptUnsaved ? '這一單沒有確定寫入，結帳資料截圖還沒存' : '',
+			unsaved > 0 ? `有 ${unsaved} 張封面還沒存到相簿` : ''
+		].filter(Boolean).join('；');
+		if (warn && !confirm(`${warn}，開始下一單就會清掉。確定嗎？`)) return;
 		this.clearPhotos();
+		this.clearReceipt();
 		this.missingPhotosAcknowledged = false;
 
 		this.rows = [];
@@ -798,10 +871,36 @@ class CheckoutApp {
 		document.getElementById('btn-close-scan')?.addEventListener('click', () => this.closeScanner());
 		document.getElementById('btn-cancel-scan')?.addEventListener('click', () => this.closeScanner());
 
+		const secretInput = document.getElementById('input-secret') as HTMLInputElement | null;
+		const urlInput = document.getElementById('input-webapp-url') as HTMLInputElement | null;
+		const secretHint = document.getElementById('secret-hint');
+		const testResult = document.getElementById('connection-result');
+		const showSecretHint = () => {
+			if (secretHint) secretHint.textContent = `密鑰：${describeSecret(cleanSecret(secretInput?.value ?? ''))}。跟 Apps Script 執行 testConnection() 印出來的對照，要一模一樣。`;
+		};
+		secretInput?.addEventListener('input', showSecretHint);
+
 		document.getElementById('btn-settings')?.addEventListener('click', () => {
-			(document.getElementById('input-webapp-url') as HTMLInputElement).value = getWebAppUrl();
-			(document.getElementById('input-secret') as HTMLInputElement).value = getSecret();
+			if (urlInput) urlInput.value = getWebAppUrl();
+			if (secretInput) secretInput.value = getSecret();
+			showSecretHint();
+			if (testResult) { testResult.textContent = ''; testResult.className = 'connection-result hidden'; }
 			UIUtils.showModal('modal-settings');
+		});
+
+		document.getElementById('btn-test-connection')?.addEventListener('click', async (e) => {
+			const button = e.currentTarget as HTMLButtonElement;
+			if (!testResult) return;
+			button.disabled = true;
+			testResult.className = 'connection-result';
+			testResult.textContent = '測試中…';
+			try {
+				const result = await testConnection(urlInput?.value.trim() ?? '', cleanSecret(secretInput?.value ?? ''));
+				testResult.className = `connection-result ${result.ok ? 'connection-result--ok' : 'connection-result--err'}`;
+				testResult.textContent = result.message + (result.ok ? '（還沒按儲存的話，記得按儲存）' : '');
+			} finally {
+				button.disabled = false;
+			}
 		});
 
 		document.getElementById('btn-cancel-settings')?.addEventListener('click', () => {
@@ -810,7 +909,7 @@ class CheckoutApp {
 
 		document.getElementById('btn-save-settings')?.addEventListener('click', () => {
 			const url = (document.getElementById('input-webapp-url') as HTMLInputElement).value.trim();
-			const secret = (document.getElementById('input-secret') as HTMLInputElement).value.trim();
+			const secret = cleanSecret((document.getElementById('input-secret') as HTMLInputElement).value);
 			saveSettings(url, secret);
 			UIUtils.hideModal('modal-settings');
 			UIUtils.showToast('設定已儲存');

@@ -143,8 +143,14 @@
 				<h4>寫入 Google Sheet</h4>
 				<input type="text" id="input-webapp-url" class="input-text"
 					placeholder="Apps Script Web App 網址（…/exec）">
+				<!-- autocomplete=off 等：別讓手機的密碼管理把別的密碼自動填進來，也別自動改大寫 -->
 				<input type="password" id="input-secret" class="input-text"
+					autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"
+					data-1p-ignore data-lpignore="true"
 					placeholder="共用密鑰（與 .gs 裡的 SHARED_SECRET 相同）">
+				<p id="secret-hint" class="secret-hint"></p>
+				<button id="btn-test-connection" class="btn btn-secondary">測試連線（不會寫入）</button>
+				<p id="connection-result" class="connection-result hidden" role="status"></p>
 				<p>部署方式見 <code>apps_script/checkout_append.gs</code> 開頭的說明。沒填網址時仍可算帳，
 					但不會寫進試算表。</p>
 				<p class="warn">⚠️ 網址與密鑰合起來等同這張試算表的寫入密碼，只存在這台裝置。
